@@ -1,0 +1,2002 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>提个醒</title>
+<script src="./assets/sdk.js"></script>
+<style>
+  :root {
+    --bg: #EDF2EB;            /* 淡薄荷纸底 */
+    --card: #FBFCF8;          /* 米白卡片 */
+    --ink: #454B43;           /* 暖墨绿字 */
+    --ink-soft: #6E7770;      /* 柔和灰绿（略深，提升小字号可读性） */
+    --accent: #5DAE8E;        /* 薄荷绿主 */
+    --accent-deep: #4A9277;
+    --accent-soft: #E4F0EA;
+    --pink: #E89BB0;          /* 樱花粉点缀 */
+    --pink-soft: #FBEDF1;
+    --line: rgba(93,122,107,.20);
+    --line-soft: rgba(93,122,107,.12);
+    --warn: #A77947;
+    --warn-soft: #FBF3E4;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  /* 滚动条统一：细薄荷圆条（2026-08-26，与全部插件同一规范，横竖皆然） */
+  *::-webkit-scrollbar{width:8px;height:8px}
+  *::-webkit-scrollbar-track{background:transparent}
+  *::-webkit-scrollbar-thumb{background:#c9dfd3;border-radius:99px;border:2px solid var(--bg)}
+  *::-webkit-scrollbar-thumb:hover{background:var(--accent)}
+  *{scrollbar-width:thin;scrollbar-color:#c9dfd3 transparent}
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: "LXGW WenKai", "霞鹜文楷", "Kaiti SC", "KaiTi", "Microsoft YaHei", serif;
+    padding: 22px 18px 40px; max-width: 720px; margin: 0 auto;
+    background-image: radial-gradient(circle at 12% 8%, rgba(93,174,142,.14) 0, transparent 110px),
+                      radial-gradient(circle at 90% 24%, rgba(232,155,176,.12) 0, transparent 120px);
+  }
+  .card {
+    background: var(--card); border: 1px solid var(--line-soft); border-radius: 20px;
+    padding: 18px 18px 16px; margin-bottom: 16px;
+    box-shadow: 0 3px 14px rgba(93,122,107,.07);
+    transition: box-shadow .18s ease, transform .18s ease;
+  }
+  .card:hover { box-shadow: 0 6px 20px rgba(93,122,107,.11); transform: translateY(-1px); }
+  .card h2 { font-size: 15.5px; font-weight: 600; margin-bottom: 13px; display: flex; align-items: center; gap: 7px; }
+  .card h2::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+  .hint { font-size: 14px; color: var(--ink-soft); line-height: 1.8; font-family: "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif; }
+  input[type="text"], input[type="time"], select {
+    border: 1px solid var(--line); border-radius: 10px; background: var(--card);
+    padding: 8px 11px; font-size: 14px; color: var(--ink); font-family: inherit;
+  }
+  select {
+    appearance: none; -webkit-appearance: none; -moz-appearance: none;
+    min-width: 0; min-height: 38px; padding: 8px 36px 8px 12px;
+    line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    background-color: var(--card);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14' fill='none'%3E%3Cpath d='M3.25 5.25 7 9l3.75-3.75' stroke='%234A9277' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 11px center; background-size: 14px 14px;
+    cursor: pointer; transition: border-color .16s, background-color .16s, box-shadow .16s;
+    color-scheme: light;
+  }
+  select:hover { border-color: var(--accent); background-color: var(--accent-soft); }
+  select:disabled { opacity: .6; cursor: default; }
+  select option { background: var(--card); color: var(--ink); }
+  input[type="time"] { width: 130px; }
+  input:focus { outline: 2px solid rgba(93,174,142,.35); border-color: var(--accent); }
+  select:focus { outline: 2px solid rgba(93,174,142,.35); outline-offset: 1px; border-color: var(--accent); }
+  .switch {
+    width: 46px; height: 25px; padding: 0; border-radius: 13px; border: 1px solid var(--line);
+    background: #E7EDE5; position: relative; cursor: pointer; transition: background .2s, border-color .2s; flex-shrink: 0;
+    appearance: none; font-size: 0;
+  }
+  .switch:focus-visible { outline: 2px solid rgba(93,174,142,.55); outline-offset: 2px; }
+  .switch::after {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 19px; height: 19px;
+    border-radius: 50%; background: #FFF; transition: left .2s; box-shadow: 0 1px 3px rgba(0,0,0,.15);
+  }
+  .switch.on { background: var(--pink); border-color: var(--pink); }
+  .switch.on::after { left: 23px; }
+  button {
+    font-family: inherit; border: 1px solid var(--line); border-radius: 11px; cursor: pointer;
+    font-size: 14px; padding: 9px 17px; background: var(--card); color: var(--ink); transition: all .16s;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent-deep); }
+  button:active { transform: scale(.97); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #FBFFFC; width: 100%; padding: 12px; font-size: 15px; letter-spacing: 2px; }
+  button.primary:hover { background: var(--accent-deep); border-color: var(--accent-deep); color: #FBFFFC; }
+  .btn-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .seg { display: flex; flex-direction: column; gap: 5px; }
+  .mode-block { margin-bottom: 14px; }
+  .mode-block:last-child { margin-bottom: 0; }
+  .mode-name { font-size: 16px; font-weight: 600; color: var(--accent-deep); margin-bottom: 6px; }
+  .mode-name::before { content: "✧ "; }
+  .seg-btn {
+    border: 1px solid var(--line); border-radius: 12px; padding: 11px 15px;
+    font-size: 15.5px; font-weight: 400; background: var(--card); color: var(--ink); cursor: pointer;
+    font-family: inherit; transition: all .16s; text-align: left;
+  }
+  .seg-btn:hover { border-color: var(--accent); }
+  .seg-btn.on { background: var(--accent); border-color: var(--accent); color: #FBFFFC; }
+  .seg-btn .seg-desc { display: block; font-size: 13.5px; opacity: 1; margin-top: 3px; color: var(--ink-soft); font-family: "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif; }
+  .seg-btn.on .seg-desc { opacity: 1; color: rgba(255,255,255,.95); }
+
+  .seg-inline { display: flex; gap: 10px; }
+  .seg-inline .seg-btn { flex: 1; text-align: center; padding: 11px 6px; }
+  .snd-folder { margin-bottom: 8px; }
+  .snd-folder-label {
+    display: block; font-size: 13.5px; font-weight: 600; color: var(--ink); margin-bottom: 5px;
+  }
+  .snd-folder-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .snd-head, .snd-row {
+    display: grid;
+    grid-template-columns: minmax(60px, .8fr) minmax(104px, 1fr) minmax(96px, 1fr) minmax(132px, 1.2fr) minmax(132px, auto);
+    gap: 8px; align-items: center;
+  }
+  .snd-row {
+    padding: 8px 2px; border-bottom: 1px dashed var(--line-soft);
+  }
+  .snd-row:last-child { border-bottom: none; }
+  .snd-row > * { min-width: 0; }
+  .snd-row .who { font-size: 14.5px; font-weight: 600; min-width: 0; }
+  .snd-head {
+    padding: 2px 2px 6px; font-size: 13px; color: var(--ink-soft); font-weight: 600;
+    font-family: "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  .snd-head .col-style, .snd-head .col-sound, .snd-head .col-trigger { min-width: 0; }
+  .snd-head .col-action { min-width: 132px; }
+  .snd-actions { display: flex; gap: 6px; align-items: center; min-width: 0; }
+  .snd-actions .mini { width: auto; flex: 1; min-width: 0; }
+  .snd-row .dd-trigger {
+    min-height: 36px;
+    padding: 7px 10px; font-size: 13.5px;
+    background-color: var(--card);
+  }
+  .snd-row .mini { width: 100%; min-width: 0; font-size: 13px; padding: 6px 8px; border-radius: 999px; white-space: nowrap; }
+  /* ── 自定义下拉组件（plugin-kit beautify-select，从 lib/beautify-select/ 读取内联） ── */
+  /* beautify-select · 手帐风自定义下拉组件样式（plugin-kit）
+   依赖 CSS 变量：--card --ink --ink-soft --line --accent --accent-deep --accent-soft
+   可选覆盖（不覆盖用默认薄荷绿）：
+     --dd-ring        展开时触发栏光圈
+     --dd-shadow      面板阴影
+     --dd-thumb       滚动条滑块
+     --dd-thumb-hover 滚动条滑块 hover
+   用法：配合 beautify-select.js，对原生 <select> 调用 beautifySelect(sel) */
+.dd { position: relative; min-width: 0; }
+.dd-native { display: none; }
+.dd-trigger {
+  width: 100%; min-height: 38px;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--card);
+  padding: 8px 12px; cursor: pointer; font-family: inherit; font-size: 14px; color: var(--ink);
+  text-align: left; transition: border-color .16s, background-color .16s, box-shadow .16s;
+}
+.dd-trigger:hover { border-color: var(--accent); background-color: var(--accent-soft); }
+.dd.open .dd-trigger { border-color: var(--accent); box-shadow: 0 0 0 2px var(--dd-ring, rgba(93,174,142,.16)); }
+.dd-label { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.dd-caret { width: 14px; height: 14px; flex-shrink: 0; color: var(--accent-deep); transition: transform .18s ease; }
+.dd.open .dd-caret { transform: rotate(180deg); }
+.dd-panel {
+  position: absolute; left: 0; right: 0; top: calc(100% + 5px); z-index: 40;
+  background: var(--card); border: 1px dashed var(--line); border-radius: 13px;
+  box-shadow: 0 12px 28px var(--dd-shadow, rgba(69,75,67,.16));
+  padding: 5px; max-height: 248px; overflow-y: auto; display: none;
+}
+.dd.open .dd-panel { display: block; }
+.dd-opt {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: 8px; cursor: pointer;
+  font-size: 14px; color: var(--ink); min-width: 0;
+  transition: background-color .12s;
+}
+.dd-opt:hover { background: var(--accent-soft); }
+.dd-opt.on { background: var(--accent-soft); color: var(--accent-deep); font-weight: 600; }
+.dd-check { width: 15px; flex-shrink: 0; color: var(--accent-deep); font-size: 12px; visibility: hidden; }
+.dd-opt.on .dd-check { visibility: visible; }
+.dd-opt-text { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* 分组（<optgroup>）渲染：组头手帐风分隔条，可点击收合 */
+.dd-group { margin: 2px 0; }
+.dd-group-head {
+  width: 100%; display: flex; align-items: center; gap: 6px;
+  padding: 7px 10px 5px; margin: 2px 0 3px;
+  border: 0; background: transparent; cursor: pointer;
+  font-family: inherit; font-size: 12px; font-weight: 600;
+  color: var(--ink-soft); letter-spacing: .03em; text-align: left;
+  border-bottom: 1px solid var(--line);
+}
+.dd-group-head:hover { color: var(--accent-deep); }
+.dd-group-caret { width: 12px; flex-shrink: 0; color: var(--accent-deep); font-size: 10px; transition: transform .15s; }
+.dd-group-body { padding: 1px 0; }
+.dd-panel::-webkit-scrollbar { width: 8px; height: 8px; }
+.dd-panel::-webkit-scrollbar-track { background: transparent; }
+.dd-panel::-webkit-scrollbar-thumb { background: var(--dd-thumb, #c9dfd3); border-radius: 99px; border: 2px solid var(--card); }
+.dd-panel::-webkit-scrollbar-thumb:hover { background: var(--dd-thumb-hover, #5dae8e); }
+.dd-panel { scrollbar-width: thin; scrollbar-color: var(--dd-thumb, #c9dfd3) transparent; }
+/* 面板溢出容器时提升该容器层级（组件 JS 展开时自动加类，收起时移除），防止下层内容穿模 */
+.dd-open-card { position: relative; z-index: 30; }
+
+  @media (max-width: 620px) {
+    .seg-inline { flex-direction: column; }
+    .seg-inline .seg-btn { flex: none; width: 100%; text-align: left; }
+    #refine-custom-box .btn-row { flex-direction: column; align-items: stretch; }
+    #refine-custom-box .btn-row > * { width: 100%; flex: none !important; }
+    .snd-head { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .snd-head .who, .snd-head .col-action { display: none; }
+    .snd-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .snd-row .who { grid-column: 1 / -1; }
+    .snd-row .dd[data-kind="style"] { grid-column: 1; }
+    .snd-row .dd[data-kind="trigger"] { grid-column: 2; }
+    .snd-row .dd[data-kind="sound"] { grid-column: 1 / -1; }
+    .snd-row .snd-actions { grid-column: 1 / -1; justify-self: start; width: 100%; }
+    .snd-row .snd-actions .mini { width: auto; }
+  }
+  .tip-line { font-size: 13.5px; color: var(--ink-soft); min-height: 20px; margin-top: 9px; font-family: "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif; }
+  .tip-ok { color: var(--accent-deep); font-weight: 600; }
+  .tip-err { color: #C96A6A; font-weight: 600; }
+  .empty { color: var(--ink-soft); font-size: 14px; text-align: center; padding: 15px 0; font-family: "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif; }
+  .hidden-agents-box {
+    margin: 8px 0 12px; padding: 12px 14px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 13px;
+  }
+  .hidden-agents-title { font-size: 13.5px; font-weight: 600; color: var(--ink); margin-bottom: 8px; }
+  .hidden-agent-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 7px 2px; border-bottom: 1px dashed var(--line-soft); font-size: 14px;
+  }
+  .hidden-agent-row:last-child { border-bottom: none; }
+  .hidden-agent-row .hint { font-size: 12px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hide-name { font-weight: 600; color: var(--ink); min-width: 0; }
+  /* 手帐风勾选框：原生隐藏，自绘小方块 + 勾 */
+  .hide-check { position: relative; display: inline-flex; align-items: center; cursor: pointer; flex-shrink: 0; }
+  .hide-check input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .hide-check-box {
+    width: 17px; height: 17px; border-radius: 5px;
+    border: 1.5px solid var(--line); background: var(--card);
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: border-color .15s, background-color .15s;
+  }
+  .hide-check input:checked + .hide-check-box {
+    border-color: var(--accent); background: var(--accent-soft);
+  }
+  .hide-check input:checked + .hide-check-box::after {
+    content: "✓"; font-size: 12px; color: var(--accent-deep); font-weight: 700;
+  }
+  .hide-check input:focus-visible + .hide-check-box { box-shadow: 0 0 0 2px var(--dd-ring, rgba(93,174,142,.16)); }
+  .footer { text-align: center; color: var(--ink-soft); font-size: 13px; margin-top: 6px; letter-spacing: 1.5px; }
+  /* 全局保存反馈闪条 */
+  .flash {
+    position: fixed; top: 18px; left: 50%; transform: translateX(-50%) translateY(-10px);
+    background: var(--ink); color: #F7FAF4; font-size: 13.5px; letter-spacing: .5px;
+    padding: 9px 19px; border-radius: 999px; box-shadow: 0 6px 18px rgba(60,70,62,.2);
+    opacity: 0; pointer-events: none; transition: opacity .22s ease, transform .22s ease; z-index: 99;
+    white-space: nowrap; max-width: 86vw; overflow: hidden; text-overflow: ellipsis;
+  }
+  .flash.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .flash.flash-ok { background: var(--accent-deep); }
+  .flash.flash-err { background: #C96A6A; }
+
+  /* plugin-kit：检查更新 + 反馈，沿用提个醒自己的薄荷纸感 */
+  /* update-checker · ui/update-checker.css — 检查更新（基础版）
+   插件可自行覆盖样式 */
+
+.uc-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.uc-btn {
+  padding: 6px 14px;
+  border: 1px solid var(--uc-border, #d8c9b5);
+  border-radius: 8px;
+  background: var(--uc-btn-bg, #faf6ef);
+  color: var(--uc-text, #5a4a3a);
+  font-size: 13px;
+  cursor: pointer;
+}
+.uc-btn:hover { background: var(--uc-btn-hover, #f3ecdf); }
+.uc-btn:disabled { opacity: .6; cursor: default; }
+
+.uc-result {
+  font-size: 12px;
+  color: var(--uc-text, #5a4a3a);
+  max-width: 320px;
+  line-height: 1.5;
+}
+
+.uc-link {
+  font-size: 12px;
+  color: var(--uc-accent, #c9a87c);
+  text-decoration: none;
+}
+.uc-link:hover { text-decoration: underline; }
+
+  /* feedback · ui/feedback.css — 提个醒专用反馈弹窗 */
+
+.tg-feedback-open {
+  padding: 6px 14px;
+  border: 1px solid var(--line, rgba(93, 122, 107, .20));
+  border-radius: 999px;
+  background: var(--card, #FBFCF8);
+  color: var(--ink, #454B43);
+  font-size: 13px;
+  cursor: pointer;
+}
+.tg-feedback-open:hover { background: var(--accent-soft, #E4F0EA); }
+
+.tg-feedback-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+.tg-feedback-modal[hidden] { display: none; }
+
+.tg-feedback-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(40, 32, 24, .45);
+}
+
+/* 纯色纸面：保留柔和圆角，但不依赖边框或阴影制造层次。 */
+.tg-feedback-dialog {
+  position: relative;
+  z-index: 1;
+  width: min(460px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background-color: var(--card, #FBFCF8);
+  background-image: none;
+  border: 0;
+  border-radius: 18px;
+  outline: 0;
+  box-shadow: none;
+  filter: none;
+  color: var(--ink, #454B43);
+}
+.tg-feedback-dialog,
+.tg-feedback-dialog::before,
+.tg-feedback-dialog::after { box-shadow: none; }
+
+.tg-feedback-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 12px;
+  background-color: var(--card, #FBFCF8);
+  border: 0;
+}
+.tg-feedback-titles { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.tg-feedback-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--accent-deep, #4A9277);
+}
+.tg-feedback-sub {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink-soft, #6E7770);
+}
+.tg-feedback-close {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-soft, #6E7770);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+.tg-feedback-close:hover { background: var(--accent-soft, #E4F0EA); color: var(--accent-deep, #4A9277); }
+
+.tg-feedback-messages {
+  flex: 1;
+  min-height: 180px;
+  max-height: 40vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 18px 12px;
+  background-color: var(--card, #FBFCF8);
+}
+.tg-feedback-welcome {
+  margin: 10px 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--ink-soft, #6E7770);
+  white-space: pre-line;
+  text-align: center;
+}
+.tg-feedback-bubble {
+  max-width: 82%;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.tg-feedback-bubble-user {
+  align-self: flex-end;
+  background: var(--warn-soft, #FBF3E4);
+  color: var(--ink, #454B43);
+}
+.tg-feedback-bubble-assistant {
+  align-self: flex-start;
+  background: #F5F1EA;
+  color: var(--ink, #454B43);
+}
+.tg-feedback-bubble-thinking {
+  align-self: flex-start;
+  font-size: 12px;
+  color: var(--ink-soft, #6E7770);
+}
+.tg-feedback-bubble-error {
+  align-self: flex-start;
+  font-size: 12px;
+  color: #B3543F;
+}
+
+.tg-feedback-preview {
+  flex: 0 1 auto;
+  max-height: 32vh;
+  overflow-y: auto;
+  margin: 0 18px 10px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 0;
+  background: var(--warn-soft, #FBF3E4);
+  color: var(--ink, #454B43);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.tg-feedback-preview-title { margin-bottom: 6px; font-weight: 600; }
+.tg-feedback-preview-item { margin-top: 4px; }
+.tg-feedback-preview-item ol { margin: 4px 0 0 18px; padding: 0; }
+.tg-feedback-preview-env { margin-top: 6px; }
+.tg-feedback-preview-env summary { cursor: pointer; color: var(--ink-soft, #6E7770); }
+.tg-feedback-preview-env pre {
+  margin: 6px 0 0;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--ink-soft, #6E7770);
+}
+
+.tg-feedback-input-row {
+  display: flex;
+  gap: 8px;
+  padding: 10px 18px 12px;
+  background-color: var(--card, #FBFCF8);
+}
+.tg-feedback-input-row textarea {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  padding: 8px 10px;
+  border: 1px solid var(--line, rgba(93, 122, 107, .20));
+  border-radius: 8px;
+  background: #FFF;
+  color: var(--ink, #454B43);
+  font-size: 13px;
+  font-family: inherit;
+  box-sizing: border-box;
+  box-shadow: none;
+}
+.tg-feedback-input-row textarea:focus {
+  outline: 2px solid rgba(93, 174, 142, .24);
+  border-color: var(--accent, #5DAE8E);
+}
+.tg-feedback-send {
+  flex: 0 0 auto;
+  align-self: stretch;
+  padding: 8px 16px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent, #5DAE8E);
+  color: #FFF;
+  font-size: 13px;
+  cursor: pointer;
+}
+.tg-feedback-send:disabled { opacity: .6; cursor: default; }
+.tg-feedback-send:hover:not(:disabled) { background: var(--accent-deep, #4A9277); }
+
+.tg-feedback-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 0 18px 16px;
+  background-color: var(--card, #FBFCF8);
+}
+.tg-feedback-actions[hidden] { display: none; }
+.tg-feedback-btn {
+  padding: 7px 14px;
+  border: 1px solid var(--line, rgba(93, 122, 107, .20));
+  border-radius: 8px;
+  background: var(--card, #FBFCF8);
+  color: var(--ink, #454B43);
+  font-size: 13px;
+  cursor: pointer;
+}
+.tg-feedback-btn:hover { border-color: var(--accent, #5DAE8E); background: var(--accent-soft, #E4F0EA); }
+.tg-feedback-btn-primary { border-color: var(--accent, #5DAE8E); background: var(--accent, #5DAE8E); color: #FFF; }
+.tg-feedback-btn-primary:hover { border-color: var(--accent-deep, #4A9277); background: var(--accent-deep, #4A9277); }
+.tg-feedback-actions-hint { font-size: 11px; color: var(--ink-soft, #6E7770); }
+
+@media (max-height: 600px) {
+  .tg-feedback-dialog { max-height: calc(100vh - 20px); }
+  .tg-feedback-head { padding: 10px 14px 8px; }
+  .tg-feedback-messages { min-height: 88px; max-height: 24vh; padding: 10px 14px; }
+  .tg-feedback-preview { max-height: 22vh; margin-left: 14px; margin-right: 14px; }
+  .tg-feedback-input-row { padding-left: 14px; padding-right: 14px; }
+  .tg-feedback-actions { padding-left: 14px; padding-right: 14px; }
+}
+
+  .support-card { padding-bottom: 15px; }
+  .support-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+  .support-head h2 { margin-bottom: 4px; }
+  .support-version { flex-shrink:0; color:var(--accent-deep); background:var(--accent-soft); border:1px dashed var(--line); border-radius:999px; padding:5px 10px; font-size:13px; font-family:"Poppins", "Noto Sans SC", system-ui, sans-serif; }
+  .support-actions { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; align-items:start; margin-top:13px; }
+  .support-actions .uc-wrap { min-width:0; gap:7px; }
+  .support-actions .uc-btn,
+  .support-actions .support-feedback-btn { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:11px; background:var(--card); color:var(--ink); font-family:inherit; font-size:14px; cursor:pointer; transition:all .16s; }
+  .support-actions .uc-btn:hover,
+  .support-actions .support-feedback-btn:hover { border-color:var(--accent); color:var(--accent-deep); background:var(--accent-soft); }
+  .support-actions .uc-result,
+  .support-actions .uc-link { flex-basis:100%; min-width:0; font-size:13px; line-height:1.55; color:var(--ink-soft); }
+  .support-actions .uc-result:empty { display:none; }
+  .support-actions .uc-link { color:var(--accent-deep); text-decoration:none; }
+  .support-actions .uc-link:hover { text-decoration:underline; }
+  .support-actions .support-feedback-btn { grid-column:2; }
+  #fb-open-btn { display:none; }
+  .support-feedback-btn { display:flex; align-items:center; justify-content:center; gap:7px; }
+  .support-entry-icon { width:18px; height:18px; flex-shrink:0; }
+  @media (max-width: 420px) { .support-actions { grid-template-columns:1fr; } .support-actions .support-feedback-btn { grid-column:auto; } }
+</style>
+</head>
+<body>
+
+<body>
+  
+  <div class="card" style="border-color:var(--warn);background:var(--warn-soft)">
+    <h2>小提示</h2>
+    <div class="hint">这一版提个醒只接管 <b>聊天回复完成</b> 提醒：为避免和 Hana 原版通知双弹，可以把 Hana 设置里「聊天回复完成」那条原版通知设为 <b>从不</b>。<b>「计划任务完成」和「巡检完成」这两条请不要关</b>，提个醒这一版还没接上它们，关了就没人提醒你了（下面这两块里的开关和档位目前也不生效）。</div>
+  </div>
+  
+
+  <div class="card">
+    <h2>提醒时机</h2>
+
+    <div class="mode-block">
+      <div class="mode-name">聊天回复完成</div>
+      <div class="seg" id="seg-chat">
+        <button class="seg-btn " data-trigger="always">总是提醒<span class="seg-desc">当前窗口也提醒，任何回复完成都弹</span></button>
+        <button class="seg-btn on" data-trigger="whenSessionUnfocused">焦点不在该聊天时<span class="seg-desc">当前版本无法可靠确认聊天焦点，会保守提醒，避免漏通知</span></button>
+        <button class="seg-btn " data-trigger="whenUnfocused">焦点不在 HanaAgent 时<span class="seg-desc">HanaAgent 在前台就不提醒，切到别的应用才提醒</span></button>
+        <button class="seg-btn " data-trigger="never">从不提醒<span class="seg-desc">关掉弹窗，需要时再打开</span></button>
+      </div>
+    </div>
+
+    <div class="mode-block">
+      <div class="mode-name">断联提醒</div>
+      <div class="btn-row" style="justify-content:space-between;margin-bottom:10px">
+        <div>
+          <div style="font-size:14px">回复异常中断时提醒</div>
+          <div class="hint">伙伴回复中途断掉（超时/报错/被意外终止）时弹一条通知。<b>这一版还没接上这个提醒，开关目前不生效</b>，先保持默认就好。</div>
+        </div>
+        <button type="button" class="switch on" id="sw-abnormal" role="switch" aria-checked="true" aria-label="断联提醒"></button>
+      </div>
+    </div>
+
+    <div class="mode-block">
+      <div class="mode-name">计划任务完成</div>
+      <div class="btn-row" style="justify-content:space-between;margin-bottom:10px">
+        <div>
+          <div style="font-size:14px">接管计划任务提醒</div>
+          <div class="hint"><b>这一版还没接上计划任务的接管</b>：这个开关和下面的档位目前都不生效，也不会补弹通知。请保持 Hana 设置里「计划任务完成」的原版通知开启，别关。</div>
+          <div class="hint" id="scheduled-off-note" style="display:none;">已关闭：提个醒不补发计划任务通知；任务自己的通知仍照常显示。重新打开会恢复之前选的提醒时机。</div>
+        </div>
+        <button type="button" class="switch on" id="sw-scheduled-takeover" role="switch" aria-checked="true" aria-label="接管计划任务提醒"></button>
+      </div>
+      <div id="scheduled-options" style="">
+        <div class="seg" id="seg-scheduled">
+          <button class="seg-btn " data-trigger="always">总是提醒<span class="seg-desc">任务跑完就弹，不管 Hana 在不在前台</span></button>
+          <button class="seg-btn on" data-trigger="whenUnfocused">焦点不在 HanaAgent 时<span class="seg-desc">正在用 Hana 就不提醒，切走才提醒（推荐）</span></button>
+          <button class="seg-btn " data-trigger="never">从不提醒<span class="seg-desc">提个醒不补弹，任务自己的通知不受影响</span></button>
+        </div>
+      </div>
+    </div>
+
+    <div class="mode-block">
+      <div class="mode-name">巡检完成</div>
+      <div class="hint" style="margin-bottom:8px"><b>这一版还没接上巡检完成的接管</b>，下面的档位目前不生效；请保持 Hana 设置里「巡检完成」的原版通知开启，别关。</div>
+      <div class="seg" id="seg-patrol">
+        <button class="seg-btn " data-trigger="always">总是提醒<span class="seg-desc">巡检跑完就弹，不管 Hana 在不在前台</span></button>
+        <button class="seg-btn on" data-trigger="whenUnfocused">焦点不在 HanaAgent 时<span class="seg-desc">正在用 Hana 就不提醒，切走才提醒（推荐）</span></button>
+        <button class="seg-btn " data-trigger="never">从不提醒<span class="seg-desc">巡检跑完不打扰</span></button>
+      </div>
+    </div>
+
+    <div class="mode-block">
+      <div class="mode-name">弹窗停留时间</div>
+      <div class="hint" style="margin-bottom:8px">Windows 系统通知默认停留较短；选“停留久一些”后，大约会显示 25 秒，实际时间仍可能受 Windows 通知设置影响。</div>
+      <div class="seg" id="seg-duration">
+        <button class="seg-btn on" data-duration="default">系统默认<span class="seg-desc">保持 Windows 当前通知时长</span></button>
+        <button class="seg-btn " data-duration="long">停留久一些<span class="seg-desc">大约 25 秒，更不容易错过</span></button>
+      </div>
+    </div>
+
+    <div class="mode-block">
+      <div class="mode-name">试一试</div>
+      <div class="btn-row" style="align-items:center;gap:10px">
+        <button type="button" id="btn-test-notify">发一条测试通知</button>
+        <span class="hint" id="test-notify-tip" style="margin:0"></span>
+      </div>
+      <div class="hint" style="margin-top:6px">按当前配置弹一条（头像、风格、音效、停留时间都走真实链路），想试哪个伙伴就先去下面「按助手个性化」里把 ta 配好，这里默认用列表第一个伙伴。</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>按助手个性化</h2>
+    <div class="hint" style="margin-bottom:8px">每个助手可以配不同的音效、通知风格和提醒时机。风格只改变标题语气和正文包装，正文永远显示助手原话，不改写不生成；音效用你放进来的音频文件；提醒时机只影响「聊天回复完成」，选「跟随全局」就用上面全局档位。</div>
+    <div class="hint" style="margin-bottom:8px">🎁 方言风格和「学我说话」<b>这一版暂时用不了</b>：它们原本靠表情包联动挂载，表情包换形态后路径对不上，所以风格列表里暂时不会出现这两类，以后修。其他风格照常。</div>
+    <div class="snd-folder">
+      <label class="snd-folder-label" for="in-snd-dir">音效文件夹</label>
+      <div class="snd-folder-row">
+        <input type="text" id="in-snd-dir" placeholder="留空 = 默认目录" style="flex:1;min-width:200px">
+        <button id="btn-pick-snd-dir">选择文件夹…</button>
+        <button id="btn-save-snd-dir">保存</button>
+      </div>
+      <div class="hint" style="margin-top:4px">默认在应用自己的数据目录里，想自己挑地方放音效（比如放别的盘），点「选择文件夹…」或者手动填路径都行，留空恢复默认。填好保存后，把音频文件放进去，点「刷新音效」就能选。</div>
+    </div>
+    <div class="btn-row" style="margin-bottom:4px">
+      <button id="btn-refresh-sounds">刷新音效</button>
+      <button id="btn-manage-hidden">管理助手</button>
+      <span class="hint" id="snd-tip"></span>
+    </div>
+    <div id="hidden-list" style="display:none" class="hidden-agents-box"></div>
+    <div id="snd-list"></div>
+  </div>
+
+  <div class="card">
+    <h2>文案润色（可选）</h2>
+    <div class="hint" style="margin-bottom:8px">标题和正文由模型改写，真正改原话（温柔风：接口报错了 → 接口报错啦，别担心～）。开启后通知会晚 1-2 秒，失败自动回退规则版。</div>
+    <div class="btn-row" style="justify-content:space-between;margin-bottom:10px">
+      <div>
+        <div style="font-size:14px">开启润色</div>
+        <div class="hint">仅对语气型风格生效（跟随默认/简洁/活泼/温柔/黑话）</div>
+      </div>
+      <button type="button" class="switch " id="sw-refine" role="switch" aria-checked="false" aria-label="开启文案润色"></button>
+    </div>
+    <div id="refine-box" style="opacity:.45;pointer-events:none;">
+      <div class="seg-inline" id="seg-refine-source" style="margin-bottom:10px">
+        <button class="seg-btn" data-source="agent">跟随助手<span class="seg-desc">零配置，交给 Hana 用默认模型处理</span></button>
+        <button class="seg-btn" data-source="hana">选模型<span class="seg-desc">从 Hana 已配置的模型里挑</span></button>
+        <button class="seg-btn" data-source="custom">自定义 API<span class="seg-desc">自己填地址和 Key（这一版暂不可用）</span></button>
+      </div>
+      <div class="hint" id="refine-agent-note" style="margin-bottom:8px;display:none">什么都不用配，交给 Hana 用默认模型处理～</div>
+      <div id="refine-hana-box" style="display:none" class="btn-row">
+        <select id="sel-refine-provider" style="flex:1"><option value="">选择供应商…</option></select>
+        <select id="sel-refine-model" style="flex:1"><option value="">选择模型…</option></select>
+      </div>
+      <div id="refine-custom-box" style="display:none">
+        <div class="hint" style="margin-bottom:6px"><b>这一版自定义 API 还用不了</b>：应用还没申请联网授权，填了也发不出去。请先用「跟随助手」或「选模型」两档。</div>
+        <input type="text" id="in-refine-base" placeholder="API 地址，如 https://api.openai.com/v1" style="width:100%;box-sizing:border-box;margin-bottom:6px">
+        <div class="btn-row" style="margin-bottom:6px">
+          <select id="sel-refine-api" style="flex:1">
+            <option value="openai-completions">OpenAI 兼容（/chat/completions）</option>
+            <option value="openai-responses">OpenAI Responses</option>
+            <option value="anthropic-messages">Anthropic（/v1/messages）</option>
+          </select>
+          <input type="password" id="in-refine-key" placeholder="API Key" style="flex:1">
+        </div>
+        <input type="text" id="in-refine-model" placeholder="模型名，如 gpt-4o-mini" style="width:100%;box-sizing:border-box">
+      </div>
+      <div class="btn-row" style="margin-top:10px">
+        <button class="primary" id="btn-refine-save">保存配置</button>
+        <button id="btn-refine-test">测试一下</button>
+        <span class="hint" id="refine-tip"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>静默时段</h2>
+    <div class="btn-row" style="justify-content:space-between;margin-bottom:10px">
+      <div>
+        <div style="font-size:14px">静默时段内不弹窗</div>
+        <div class="hint">适合睡觉、开会，不想被吵醒的时候</div>
+      </div>
+      <button type="button" class="switch " id="sw-quiet" role="switch" aria-checked="false" aria-label="开启静默时段"></button>
+    </div>
+    <div class="btn-row" id="quiet-times" style="opacity:.45;pointer-events:none;">
+      <input type="time" id="in-qstart" value="22:00">
+      <span style="color:var(--ink-soft)">至</span>
+      <input type="time" id="in-qend" value="08:00">
+      <span class="hint">（支持跨午夜）</span>
+    </div>
+  </div>
+
+  <div class="card support-card">
+    <div class="support-head">
+      <div>
+        <h2>关于提个醒</h2>
+        <div class="hint">这里看当前版本号。<b>「检查更新」和「反馈」这一版还用不了</b>（要走应用的出网授权，还没接上），报问题请直接到 GitHub 仓库提 Issue。</div>
+      </div>
+      <span class="support-version" id="about-version">v—</span>
+    </div>
+    <div class="support-actions">
+      <div class="uc-wrap"><button type="button" class="uc-btn" id="uc-check-btn">检查更新</button><span class="uc-result" id="uc-result"></span><a class="uc-link" id="uc-link" target="_blank" rel="noopener" hidden>去看看</a></div>
+      <button type="button" class="support-feedback-btn" id="feedback-entry" aria-controls="fb-modal" aria-haspopup="dialog" title="有问题想说？跟反馈小助手聊聊">
+        <svg class="support-entry-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5c-1.6 0-3.1-.4-4.4-1.2L3 20l1.2-5.1A8.5 8.5 0 1 1 21 11.5z"/></svg>
+        <span>反馈</span>
+      </button>
+    </div>
+  </div>
+  <button type="button" class="tg-feedback-open" id="fb-open-btn">反馈</button><div class="tg-feedback-modal" id="fb-modal" hidden role="dialog" aria-modal="true" aria-labelledby="fb-modal-title"><div class="tg-feedback-backdrop" data-fb-close></div><div class="tg-feedback-dialog"><div class="tg-feedback-head"><div class="tg-feedback-titles"><span class="tg-feedback-title" id="fb-modal-title">反馈小助手</span><span class="tg-feedback-sub">想说啥用大白话讲，它帮你整理成规范反馈</span></div><button type="button" class="tg-feedback-close" data-fb-close aria-label="关闭反馈窗口">×</button></div><div class="tg-feedback-messages" id="fb-messages"></div><div class="tg-feedback-preview" id="fb-issue-preview" hidden></div><div class="tg-feedback-input-row"><textarea id="fb-input" placeholder="比如：更新完设置就打不开了…" rows="2"></textarea><button type="button" class="tg-feedback-send" id="fb-send-btn">发送</button></div><div class="tg-feedback-actions" id="fb-actions" hidden><a class="tg-feedback-btn tg-feedback-btn-primary" id="fb-submit-link" target="_blank" rel="noopener" hidden>生成提交页</a><button type="button" class="tg-feedback-btn" id="fb-copy-btn">复制文案</button><span class="tg-feedback-actions-hint" id="fb-actions-hint">检查整理好的内容后再提交</span></div></div></div>
+
+  <div class="footer">提个醒 · moononnn & 小花</div>
+  <div class="flash" id="flash" role="status"></div>
+
+<script>
+
+// beautify-select · 手帐风自定义下拉组件（plugin-kit）
+// 用法：
+//   1. 页面引入 beautify-select.css（或服务端内联）
+//   2. 页面引入本文件（或服务端内联）
+//   3. 对每个原生 <select> 调用 beautifySelect(sel)
+// 特性：
+//   - 原生 select 只保留值和 change 事件（视觉隐藏），外部改 options/value 经 MutationObserver 自动同步面板
+//   - 面板 absolute left/right 0，与触发栏等宽（根治原生下拉面板宽度错位）
+//   - 展开时自动提升最近 .card / [data-dd-lift] 容器的层级（.dd-open-card），
+//     防止面板溢出容器时被下层内容（开关等）穿模盖住
+//   - 主题色全部走 CSS 变量：--card --ink --ink-soft --line --accent --accent-deep --accent-soft
+(function () {
+  "use strict";
+
+  function escapeText(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  function beautifySelect(sel) {
+    if (!sel || sel.dataset.ddReady) return;
+    sel.dataset.ddReady = "1";
+    var wrap = document.createElement("div");
+    wrap.className = "dd";
+    if (sel.dataset.kind) wrap.dataset.kind = sel.dataset.kind;
+    if (sel.dataset.agent) wrap.dataset.agent = sel.dataset.agent;
+    var inline = sel.getAttribute("style");
+    if (inline) { wrap.setAttribute("style", inline); sel.removeAttribute("style"); }
+    sel.classList.add("dd-native");
+    sel.parentNode.insertBefore(wrap, sel);
+    wrap.appendChild(sel);
+
+    var trigger = document.createElement("button");
+    trigger.type = "button";
+    trigger.className = "dd-trigger";
+    trigger.innerHTML = '<span class="dd-label"></span>' +
+      '<svg class="dd-caret" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M3.25 5.25 7 9l3.75-3.75" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    wrap.appendChild(trigger);
+
+    var panel = document.createElement("div");
+    panel.className = "dd-panel";
+    wrap.appendChild(panel);
+
+    var lifted = null;
+    var collapsed = {}; // 分组收合状态（data-group 键）
+
+    function currentLabel() {
+      var i = sel.selectedIndex;
+      if (i >= 0 && sel.options[i]) return sel.options[i].textContent;
+      return "";
+    }
+
+    // 只刷新触发栏文字（选中变化后立即调用，避免关闭面板后显示旧值）
+    function updateLabel() {
+      var label = currentLabel();
+      var labelEl = trigger.querySelector(".dd-label");
+      if (labelEl) labelEl.textContent = label;
+      trigger.title = label;
+    }
+
+    function renderPanel() {
+      updateLabel();
+      var html = "";
+      // 支持 <optgroup> 分组：组头渲染为手帐风分隔标题，展开后可收合
+      for (var g = 0; g < sel.children.length; g++) {
+        var child = sel.children[g];
+        if (child.tagName && child.tagName.toLowerCase() === "optgroup") {
+          var gKey = "g" + g;
+          // 默认折叠：只有当前选中项所在的组展开，其他组收着（清爽）；
+          // 用户点过组头后记住手动收合态（collapsed），手动展开的组不再被自动收起。
+          var groupHasSelection = false;
+          for (var gi2 = 0; gi2 < child.children.length; gi2++) {
+            var gopt = child.children[gi2];
+            if (gopt && gopt === sel.options[sel.selectedIndex]) { groupHasSelection = true; break; }
+          }
+          var gOpen = collapsed[gKey] !== undefined
+            ? collapsed[gKey]
+            : groupHasSelection;
+          html += '<div class="dd-group" data-group="' + g + '">' +
+            '<button type="button" class="dd-group-head" data-group="' + g + '" aria-expanded="' + (gOpen ? "true" : "false") + '">' +
+            '<span class="dd-group-caret">' + (gOpen ? "▾" : "▸") + "</span>" +
+            '<span class="dd-group-label">' + escapeText(child.label || "") + "</span>" +
+            "</button>";
+          if (gOpen) {
+            html += '<div class="dd-group-body" data-group="' + g + '">';
+            for (var i = 0; i < child.children.length; i++) {
+              var o = child.children[i];
+              if (o.tagName && o.tagName.toLowerCase() !== "option") continue;
+              var on = o === sel.options[sel.selectedIndex];
+              html += '<div class="dd-opt' + (on ? " on" : "") + '" data-i="' + optionIndexOf(sel, o) + '">' +
+                '<span class="dd-check">✓</span>' +
+                '<span class="dd-opt-text">' + escapeText(o.textContent) + "</span></div>";
+            }
+            html += "</div>";
+          }
+          html += "</div>";
+        } else if (child.tagName && child.tagName.toLowerCase() === "option") {
+          // 无分组 option（混排兜底）
+          var on2 = child === sel.options[sel.selectedIndex];
+          html += '<div class="dd-opt' + (on2 ? " on" : "") + '" data-i="' + optionIndexOf(sel, child) + '">' +
+            '<span class="dd-check">✓</span>' +
+            '<span class="dd-opt-text">' + escapeText(child.textContent) + "</span></div>";
+        }
+      }
+      panel.innerHTML = html;
+      // 组头点击：收合/展开（只记状态，不改选中）
+      panel.querySelectorAll(".dd-group-head").forEach(function (head) {
+        head.addEventListener("click", function (e) {
+          e.stopPropagation();
+          var g = head.dataset.group;
+          var key = "g" + g;
+          var body = panel.querySelector('.dd-group-body[data-group="' + g + '"]');
+          if (body) {
+            collapsed[key] = false;
+            renderPanel();
+          } else {
+            collapsed[key] = true;
+            renderPanel();
+          }
+        });
+      });
+      var cur = panel.querySelector(".dd-opt.on");
+      if (cur) {
+        var pt = cur.offsetTop;
+        var ph = cur.offsetHeight;
+        if (pt < panel.scrollTop) panel.scrollTop = pt;
+        else if (pt + ph > panel.scrollTop + panel.clientHeight) panel.scrollTop = pt + ph - panel.clientHeight;
+      }
+    }
+
+    // option 在 select 里的全局索引（含 optgroup 内）
+    function optionIndexOf(sel, opt) {
+      for (var i = 0; i < sel.options.length; i++) {
+        if (sel.options[i] === opt) return i;
+      }
+      return -1;
+    }
+
+    // 面板溢出容器时，提升最近的 .card / [data-dd-lift] 容器层级，防止被下层内容穿模盖住
+    function findLiftTarget() {
+      var el = wrap.parentElement;
+      while (el && el !== document.body) {
+        if (el.classList && (el.classList.contains("card") || (el.getAttribute && el.getAttribute("data-dd-lift") !== null))) {
+          return el;
+        }
+        el = el.parentElement;
+      }
+      return null;
+    }
+    function lift() {
+      if (!lifted) lifted = findLiftTarget();
+      if (lifted) lifted.classList.add("dd-open-card");
+    }
+    function unlift() {
+      if (lifted) { lifted.classList.remove("dd-open-card"); lifted = null; }
+    }
+
+    function close() {
+      wrap.classList.remove("open");
+      updateLabel(); // 关闭时同步触发栏，防止选中后仍显示旧值（需再次打开才更新的 bug）
+      unlift();
+    }
+    function open() {
+      renderPanel();
+      var all = document.querySelectorAll(".dd.open");
+      for (var i = 0; i < all.length; i++) {
+        if (all[i] !== wrap && all[i]._ddClose) all[i]._ddClose();
+      }
+      wrap.classList.add("open");
+      lift();
+    }
+    wrap._ddClose = close;
+    wrap._ddRefresh = renderPanel; // 外部直接改 select.value 后调用，同步触发栏与面板
+
+    trigger.addEventListener("click", function () {
+      if (wrap.classList.contains("open")) close(); else open();
+    });
+    panel.addEventListener("click", function (e) {
+      var opt = e.target && e.target.closest ? e.target.closest(".dd-opt") : null;
+      if (!opt) return;
+      sel.selectedIndex = Number(opt.dataset.i);
+      close();
+      sel.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    document.addEventListener("click", function (e) {
+      if (!wrap.contains(e.target)) close();
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") close();
+    });
+    // 外部代码直接改 options/value（如动态塞模型列表）时自动同步面板
+    var mo = new MutationObserver(function () {
+      renderPanel();
+      setTimeout(renderPanel, 0); // value 赋值紧随 innerHTML 时，下一轮事件循环再同步一次
+    });
+    mo.observe(sel, { childList: true, attributes: true, subtree: true });
+    renderPanel();
+  }
+
+  if (typeof window !== "undefined") window.beautifySelect = beautifySelect;
+  if (typeof globalThis !== "undefined") globalThis.beautifySelect = beautifySelect;
+})();
+
+
+
+// update-checker · ui/update-checker.js — 检查更新按钮 + 结果（基础版）
+// 用法（插件接入）：
+//   1. 后端挂一个路由：GET {apiBase} → uc.check({ repo }) 的结果
+//   2. 页面插入 updateCheckerHtml() 的返回值（本文件挂 window 全局，需随插件页面加载：
+//      服务端渲染内联，或放插件 assets/ 走 Hana 官方资产 URL，不能用静态 import）
+//   3. 页面加载后调 bindUpdateChecker({ apiBase, apiFetch, onToast })
+// 后端接口约定：
+//   GET {apiBase} → { ok, hasUpdate, current, latest, latestTitle, releaseUrl, message, cached }
+// apiFetch：可选。不传时组件自动使用可靠的 Hana 页面请求方式（闲不住等成熟插件验证）：
+//   从服务端注入的 window.__TOKEN（或 URL 的 ?token=）取凭证，手动拼「插件前缀 + 相对路径 + ?token=」。
+//   不要依赖 window.hana.api.fetch——插件 iframe 里它不可靠，裸 fetch 又会丢 token 导致 403。
+//   接入方有特殊封装时可显式注入。
+// ⚠️ 前端路由不带斜杠前缀：apiBase 传 "api/check-update"（后端注册的是 "/api/check-update"）
+
+(function (global) {
+  'use strict';
+
+  function updateCheckerHtml() {
+    return ''
+      + '<div class="uc-wrap">'
+      +   '<button type="button" class="uc-btn" id="uc-check-btn">检查更新</button>'
+      +   '<span class="uc-result" id="uc-result"></span>'
+      +   '<a class="uc-link" id="uc-link" target="_blank" rel="noopener" hidden>去看看</a>'
+      + '</div>';
+  }
+
+  function bindUpdateChecker(opts) {
+    if (!opts || !opts.apiBase) throw new Error('update-checker ui: apiBase 必填');
+    var apiBase = opts.apiBase.replace(/\/+$/, '');
+    var onToast = opts.onToast || function (msg) { alert(msg); };
+    // Hana 页面 API 请求必须带凭证：优先用接入方注入的 apiFetch；不传则自动探测
+    // window.__TOKEN（服务端从页面 URL 的 ?token= 注入），手动拼「插件前缀 + 路径 + ?token=」。
+    // 不用 window.hana.api.fetch（iframe 里不可靠），也不裸 fetch（会丢 token → 403）。
+    function pluginApiFetch(url, init) {
+      var base = (window.location.pathname || '').replace(/\/page\/?$/, '').replace(/\/+$/, '');
+      var token = (typeof window.__TOKEN !== 'undefined' && window.__TOKEN) || '';
+      if (!token) {
+        try {
+          var m = /[?&]token=([^&]+)/.exec(window.location.search || '');
+          if (m) token = decodeURIComponent(m[1]);
+        } catch (e) { /* 忽略 */ }
+      }
+      var cleanUrl = String(url || '').replace(/^\/+/, '');
+      var full = (base ? base + '/' : '') + cleanUrl;
+      if (token) full += (full.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(token);
+      return fetch(full, init || {});
+    }
+    var apiFetch = (typeof opts.apiFetch === 'function')
+      ? opts.apiFetch
+      : pluginApiFetch;
+
+    var btn = document.getElementById('uc-check-btn');
+    var resultEl = document.getElementById('uc-result');
+    var linkEl = document.getElementById('uc-link');
+    if (!btn || !resultEl) return;
+
+    btn.addEventListener('click', async function () {
+      btn.disabled = true;
+      var old = btn.textContent;
+      btn.textContent = '检查中…';
+      resultEl.textContent = '';
+      linkEl.hidden = true;
+      try {
+        var resp = await apiFetch(apiBase, { signal: AbortSignal.timeout(15000) });
+        var data = await resp.json();
+        if (!data.ok) throw new Error(data.error || '检查失败');
+        resultEl.textContent = data.hasUpdate
+          ? '发现新版本 v' + String(data.latest || '') + (data.latestTitle ? '（' + String(data.latestTitle) + '）' : '')
+          : String(data.message || '检查完成');
+        if (data.hasUpdate && data.releaseUrl && /^https?:\/\//.test(data.releaseUrl)) {
+          linkEl.href = data.releaseUrl;
+          linkEl.hidden = false;
+        }
+      } catch (e) {
+        resultEl.textContent = '⚠ ' + e.message;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = old;
+      }
+    });
+  }
+
+  global.updateCheckerHtml = updateCheckerHtml;
+  global.bindUpdateChecker = bindUpdateChecker;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+// feedback · ui/feedback.js — 反馈小助手聊天窗（基础版）
+// 用法（插件接入）：
+//   1. 后端挂 2 个路由：
+//      POST {apiBase}/chat       → fb.handleChat
+//      POST {apiBase}/chat/close → fb.handleClose
+//   2. 页面插入 feedbackHtml() 的返回值（本文件挂 window 全局，需随插件页面加载：
+//      服务端渲染内联，或放插件 assets/ 走 Hana 官方资产 URL，不能用静态 import）
+//   3. 页面加载后调 bindFeedback({ apiBase, apiFetch, onToast, openerId })
+//      openerId 可传外部可见入口的 id；关闭弹窗后焦点会回到该入口。
+// 后端接口约定：
+//   POST {apiBase}/chat   body: { message, session_id } → { ok, session_id, reply, issue, env, prefillUrl }
+//   POST {apiBase}/chat/close  body: { session_id } → { ok }
+// apiFetch：可选。不传时组件自动使用可靠的 Hana 页面请求方式（闲不住等成熟插件验证）：
+//   从服务端注入的 window.__TOKEN（或 URL 的 ?token=）取凭证，手动拼「插件前缀 + 相对路径 + ?token=」。
+//   不要依赖 window.hana.api.fetch——插件 iframe 里它不可靠，裸 fetch 又会丢 token 导致 403。
+//   接入方有特殊封装时可显式注入。
+// ⚠️ 前端路由不带斜杠前缀：apiBase 传 "api/feedback"（后端注册的是 "/api/feedback/..."）
+// 注意：renderEnvText 与 core/env.js 同步；renderBodyText 与 core/issue.js 的 renderIssueText 同步，改动需两边同步
+
+(function (global) {
+  'use strict';
+
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  // 环境信息渲染（与后端 renderEnvText 同款，前端复制文案用）
+  function renderEnvText(env) {
+    if (!env) return '';
+    var lines = ['【环境信息】（自动收集）'];
+    lines.push('- 插件：' + (env.pluginName || '未知') + ' v' + (env.pluginVersion || '未知'));
+    lines.push('- Hana 版本：' + (env.hanaVersion || '未知'));
+    lines.push('- 系统：' + (env.os || '未知'));
+    if (env.modelSource) lines.push('- 模型档位：' + env.modelSource);
+    return lines.join('\n');
+  }
+
+  // issue 文案渲染（与后端 renderIssueText 同款）
+  function renderBodyText(issue, env) {
+    if (!issue) return '';
+    var parts = [];
+    if (issue.description) parts.push('## 描述\n' + issue.description);
+    if (issue.steps && issue.steps.length) {
+      parts.push('## 复现步骤\n' + issue.steps.map(function (s, i) { return (i + 1) + '. ' + s; }).join('\n'));
+    }
+    if (issue.expected) parts.push('## 期望行为\n' + issue.expected);
+    if (issue.actual) parts.push('## 实际表现\n' + issue.actual);
+    var envText = renderEnvText(env);
+    if (envText) parts.push('## 环境信息\n' + envText);
+    return parts.join('\n\n');
+  }
+
+  function issuePreviewHtml(issue, env) {
+    if (!issue) return '';
+    var html = '<div class="tg-feedback-preview-title">Issue 草稿（确认无误再提交）</div>';
+    html += '<div class="tg-feedback-preview-item"><b>标题：</b>' + esc(issue.title || '（无）') + '</div>';
+    if (issue.description) html += '<div class="tg-feedback-preview-item"><b>描述：</b>' + esc(issue.description) + '</div>';
+    if (issue.steps && issue.steps.length) {
+      html += '<div class="tg-feedback-preview-item"><b>复现步骤：</b><ol>' + issue.steps.map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ol></div>';
+    }
+    if (issue.expected) html += '<div class="tg-feedback-preview-item"><b>期望：</b>' + esc(issue.expected) + '</div>';
+    if (issue.actual) html += '<div class="tg-feedback-preview-item"><b>实际：</b>' + esc(issue.actual) + '</div>';
+    var envText = renderEnvText(env);
+    if (envText) html += '<details class="tg-feedback-preview-env"><summary>环境信息</summary><pre>' + esc(envText) + '</pre></details>';
+    return html;
+  }
+
+  function feedbackHtml() {
+    return ''
+      + '<button type="button" class="tg-feedback-open" id="fb-open-btn">反馈</button>'
+      + '<div class="tg-feedback-modal" id="fb-modal" hidden role="dialog" aria-modal="true" aria-labelledby="fb-modal-title">'
+      +   '<div class="tg-feedback-backdrop" data-fb-close></div>'
+      +   '<div class="tg-feedback-dialog">'
+      +     '<div class="tg-feedback-head">'
+      +       '<div class="tg-feedback-titles"><span class="tg-feedback-title" id="fb-modal-title">反馈小助手</span><span class="tg-feedback-sub">想说啥用大白话讲，它帮你整理成规范反馈</span></div>'
+      +       '<button type="button" class="tg-feedback-close" data-fb-close aria-label="关闭反馈窗口">×</button>'
+      +     '</div>'
+      +     '<div class="tg-feedback-messages" id="fb-messages"></div>'
+      +     '<div class="tg-feedback-preview" id="fb-issue-preview" hidden></div>'
+      +     '<div class="tg-feedback-input-row">'
+      +       '<textarea id="fb-input" placeholder="比如：更新完设置就打不开了…" rows="2"></textarea>'
+      +       '<button type="button" class="tg-feedback-send" id="fb-send-btn">发送</button>'
+      +     '</div>'
+      +     '<div class="tg-feedback-actions" id="fb-actions" hidden>'
+      +       '<a class="tg-feedback-btn tg-feedback-btn-primary" id="fb-submit-link" target="_blank" rel="noopener" hidden>生成提交页</a>'
+      +       '<button type="button" class="tg-feedback-btn" id="fb-copy-btn">复制文案</button>'
+      +       '<span class="tg-feedback-actions-hint" id="fb-actions-hint">检查整理好的内容后再提交</span>'
+      +     '</div>'
+      +   '</div>'
+      + '</div>';
+  }
+
+  function bindFeedback(opts) {
+    if (!opts || !opts.apiBase) throw new Error('feedback ui: apiBase 必填');
+    var apiBase = opts.apiBase.replace(/\/+$/, '');
+    var onToast = opts.onToast || function (msg) { alert(msg); };
+    var openerEl = document.getElementById(opts.openerId || 'fb-open-btn');
+    // Hana 页面 API 请求必须带凭证：优先用接入方注入的 apiFetch；不传则自动探测
+    // window.__TOKEN（服务端从页面 URL 的 ?token= 注入），手动拼「插件前缀 + 路径 + ?token=」。
+    // 不用 window.hana.api.fetch（iframe 里不可靠），也不裸 fetch（会丢 token → 403）。
+    function pluginApiFetch(url, init) {
+      var base = (window.location.pathname || '').replace(/\/page\/?$/, '').replace(/\/+$/, '');
+      var token = (typeof window.__TOKEN !== 'undefined' && window.__TOKEN) || '';
+      if (!token) {
+        try {
+          var m = /[?&]token=([^&]+)/.exec(window.location.search || '');
+          if (m) token = decodeURIComponent(m[1]);
+        } catch (e) { /* 忽略 */ }
+      }
+      var cleanUrl = String(url || '').replace(/^\/+/, '');
+      var full = (base ? base + '/' : '') + cleanUrl;
+      if (token) full += (full.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(token);
+      return fetch(full, init || {});
+    }
+    var apiFetch = (typeof opts.apiFetch === 'function')
+      ? opts.apiFetch
+      : pluginApiFetch;
+
+    var modal = document.getElementById('fb-modal');
+    var messagesEl = document.getElementById('fb-messages');
+    var previewEl = document.getElementById('fb-issue-preview');
+    var actionsEl = document.getElementById('fb-actions');
+    var inputEl = document.getElementById('fb-input');
+    var sendBtn = document.getElementById('fb-send-btn');
+    if (!modal || !messagesEl) return;
+
+    var sessionId = null;
+    var lastIssue = null;
+    var lastEnv = null;
+
+    function toast(msg, isError) {
+      onToast((isError ? '⚠ ' : '') + msg, isError);
+    }
+
+    function bubble(role, text) {
+      var div = document.createElement('div');
+      div.className = 'tg-feedback-bubble tg-feedback-bubble-' + role;
+      div.textContent = text;
+      messagesEl.appendChild(div);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+      return div;
+    }
+
+    function showPreview(issue, env, prefillUrl) {
+      lastIssue = issue;
+      lastEnv = env;
+      previewEl.innerHTML = issuePreviewHtml(issue, env);
+      previewEl.hidden = false;
+      actionsEl.hidden = false;
+      // 提交页用 <a> 链接（webview 里 window.open 常被拦，target=_blank 链接实测可用）
+      var linkEl = document.getElementById('fb-submit-link');
+      if (linkEl) {
+        if (prefillUrl) { linkEl.href = prefillUrl; linkEl.hidden = false; }
+        else { linkEl.removeAttribute('href'); linkEl.hidden = true; }
+      }
+      var hintEl = document.getElementById('fb-actions-hint');
+      if (hintEl) hintEl.textContent = prefillUrl
+        ? '提交页打开后内容已填好，检查一下再提交'
+        : '当前还未配置公开仓库，可以复制文案后手动提交';
+      actionsEl.scrollIntoView({ block: 'nearest' });
+    }
+
+    function resetChat() {
+      sessionId = null;
+      lastIssue = null;
+      lastEnv = null;
+      messagesEl.innerHTML = '<div class="tg-feedback-welcome">告诉我遇到了什么问题，或者想要什么新功能。\n不清楚的地方它会问你。</div>';
+      previewEl.hidden = true;
+      actionsEl.hidden = true;
+    }
+
+    async function send() {
+      var msg = inputEl.value.trim();
+      if (!msg) return;
+      inputEl.value = '';
+      bubble('user', msg);
+      sendBtn.disabled = true;
+      sendBtn.textContent = '思考中…';
+      var thinking = bubble('thinking', '正在整理…');
+      try {
+        var resp = await apiFetch(apiBase + '/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: msg, session_id: sessionId }),
+          signal: AbortSignal.timeout(40000),
+        });
+        var data = await resp.json();
+        thinking.remove();
+        if (!data.ok) throw new Error(data.error || '出错了');
+        sessionId = data.session_id;
+        if (data.reply) bubble('assistant', data.reply);
+        if (data.issue) showPreview(data.issue, data.env, data.prefillUrl || '');
+      } catch (e) {
+        thinking.remove();
+        bubble('error', '⚠ ' + e.message);
+      } finally {
+        sendBtn.disabled = false;
+        sendBtn.textContent = '发送';
+        inputEl.focus();
+      }
+    }
+
+    // 事件绑定（事件委托）
+    modal.addEventListener('click', function (e) {
+      var t = e.target;
+      if (t.closest && t.closest('[data-fb-close]')) { close(); return; }
+      if (t.id === 'fb-send-btn') { send(); return; }
+      if (t.id === 'fb-copy-btn') {
+        var bodyText = renderBodyText(lastIssue, lastEnv);
+        if (!bodyText) { toast('还没有可复制的内容'); return; }
+        try {
+          navigator.clipboard.writeText(bodyText).then(function () {
+            toast('已复制，打开 GitHub Issues 粘贴即可');
+          }, function () {
+            toast('复制失败，请手动选择复制', true);
+          });
+        } catch (err) {
+          toast('复制失败：' + err.message, true);
+        }
+        return;
+      }
+    });
+
+    inputEl.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && !modal.hidden) close();
+    });
+
+    function open() {
+      resetChat();
+      modal.hidden = false;
+      if (openerEl) openerEl.setAttribute('aria-expanded', 'true');
+      setTimeout(function () { inputEl.focus(); }, 80);
+    }
+
+    function close() {
+      modal.hidden = true;
+      if (openerEl) openerEl.setAttribute('aria-expanded', 'false');
+      if (sessionId) {
+        apiFetch(apiBase + '/chat/close', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: sessionId }),
+        }).catch(function () {});
+        sessionId = null;
+      }
+      if (openerEl && typeof openerEl.focus === 'function') openerEl.focus();
+    }
+
+    var openBtn = document.getElementById('fb-open-btn');
+    if (openBtn) openBtn.addEventListener('click', open);
+  }
+
+  global.feedbackHtml = feedbackHtml;
+  global.bindFeedback = bindFeedback;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+
+</script>
+<script>
+  var DEFAULT_QUIET = { enabled: false, start: "22:00", end: "08:00" };
+function boot() {
+  window.parent && window.parent.postMessage({ protocol: "hana.plugin.ui", version: 1, kind: "event", type: "hana.ready" }, "*");
+
+  var cfg = window.__CFG__ || {};
+  // 取数统一走宿主 SDK 的 fetch（票据在请求头里，自己拼 URL 会被判 403）。
+  // rawApi 保留原始 Response 给积木组件；api 则给页面逻辑统一返回 JSON 对象。
+  // App 页面只在应用宿主里跑，取数统一走宿主 SDK 的 fetch
+  // （票据在请求头里，裸 fetch 或自己拼 URL 会被判 403）。
+  function rawApi(path, init) {
+    var cleanPath = path.charAt(0) === "/" ? path.slice(1) : path;
+    var request = Object.assign({}, init || {});
+    if (!request.signal) request.signal = AbortSignal.timeout(8000);
+    if (request.body != null) {
+      var headers = new Headers(request.headers || {});
+      if (!headers.has("content-type")) headers.set("Content-Type", "application/json");
+      request.headers = headers;
+    }
+    return window.hana.api.fetch(cleanPath, request);
+  }
+
+  function api(path, init) {
+    return rawApi(path, init).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (data) {
+        var result = data && typeof data === "object" ? data : {};
+        if (!r.ok) {
+          result.ok = false;
+          result.error = result.error || ("请求失败（HTTP " + r.status + "）");
+        }
+        return result;
+      });
+    });
+  }
+
+  function bind(id, evt, fn) {
+    var el = document.getElementById(id);
+    if (el) el.addEventListener(evt, fn);
+  }
+
+  function showTip(id, text, ms) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = text;
+    if (ms) setTimeout(function () { el.textContent = ""; }, ms);
+  }
+
+  // 页面内所有静态下拉（文案润色的供应商 / 模型 / API 类型）统一换肤
+  // beautifySelect 组件本体由上方独立 script 块提供（plugin-kit beautify-select）
+  ["sel-refine-provider", "sel-refine-model", "sel-refine-api"].forEach(function (id) {
+    var el = document.getElementById(id);
+    if (el) beautifySelect(el);
+  });
+
+  // 全局保存反馈闪条（顶部居中淡入淡出）
+  var flashTimer = null;
+  function flashTip(text, kind) {
+    var el = document.getElementById("flash");
+    if (!el) return;
+    el.textContent = text;
+    el.className = "flash show" + (kind === "ok" ? " flash-ok" : kind === "err" ? " flash-err" : "");
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(function () { el.className = "flash"; }, kind === "err" ? 3200 : 1800);
+  }
+
+  // ── 分享版入口积木：检查更新 + 反馈 ──
+  function kitToast(text, isError) { flashTip(text, isError ? "err" : "ok"); }
+  if (typeof bindUpdateChecker === "function") {
+    bindUpdateChecker({ apiBase: "api/check-update", apiFetch: rawApi, onToast: kitToast });
+  }
+  if (typeof bindFeedback === "function") {
+    bindFeedback({ apiBase: "api/feedback", apiFetch: rawApi, onToast: kitToast, openerId: "feedback-entry" });
+  }
+  // 反馈弹窗放在卡片外，避免卡片 hover 的 transform 改变 fixed 弹窗的定位。
+  bind("feedback-entry", "click", function () {
+    var btn = document.getElementById("fb-open-btn");
+    if (btn) btn.click();
+  });
+
+  // ── 提醒时机（三项各自独立，跟 Hana 原版一致） ──
+  var durationSeg = document.getElementById("seg-duration");
+  if (durationSeg) {
+    durationSeg.addEventListener("click", function (e) {
+      var btn = e.target.closest ? e.target.closest(".seg-btn[data-duration]") : null;
+      if (!btn) return;
+      cfg.toastDuration = btn.dataset.duration === "long" ? "long" : "default";
+      durationSeg.querySelectorAll(".seg-btn").forEach(function (b) {
+        b.classList.toggle("on", b === btn);
+      });
+      api("/api/config", { method: "POST", body: JSON.stringify({ toastDuration: cfg.toastDuration }) })
+        .then(function () { flashTip("已保存 ✓", "ok"); })
+        .catch(function () { flashTip("保存失败，看 Hana 日志", "err"); });
+    });
+  }
+
+  // 发一条测试通知：看到弹窗就说明链路是通的
+  bind("btn-test-notify", "click", function () {
+    var btn = document.getElementById("btn-test-notify");
+    var tip = document.getElementById("test-notify-tip");
+    if (btn) { btn.disabled = true; btn.textContent = "发送中…"; }
+    api("/api/test-notify", { method: "POST" })
+      .then(function (r) {
+        if (tip) tip.textContent = r && r.ok && r.sent ? "已提交给系统，留意实际弹窗" : "失败：" + ((r && r.error) || "看 Hana 日志");
+      })
+      .catch(function () { if (tip) tip.textContent = "请求失败，看 Hana 日志"; })
+      .then(function () {
+        if (btn) { btn.disabled = false; btn.textContent = "发一条测试通知"; }
+        if (tip) setTimeout(function () { tip.textContent = ""; }, 3000);
+      });
+  });
+
+  var TRIGGER_FIELDS = {
+    "seg-chat": "chatTrigger",
+    "seg-scheduled": "scheduledTrigger",
+    "seg-patrol": "patrolTrigger"
+  };
+  Object.keys(TRIGGER_FIELDS).forEach(function (segId) {
+    var field = TRIGGER_FIELDS[segId];
+    var seg = document.getElementById(segId);
+    if (!seg) return;
+    seg.addEventListener("click", function (e) {
+      var btn = e.target.closest ? e.target.closest(".seg-btn[data-trigger]") : null;
+      if (!btn) return;
+      cfg[field] = btn.dataset.trigger;
+      seg.querySelectorAll(".seg-btn").forEach(function (b) {
+        b.classList.toggle("on", b === btn);
+      });
+      var patch = {};
+      patch[field] = cfg[field];
+      api("/api/config", { method: "POST", body: JSON.stringify(patch) })
+        .then(function () { flashTip("已保存 ✓", "ok"); })
+        .catch(function () { flashTip("保存失败，看 Hana 日志", "err"); });
+    });
+  });
+
+  function setScheduledTakeover(on) {
+    cfg.scheduledTakeover = !!on;
+    var sw = document.getElementById("sw-scheduled-takeover");
+    var options = document.getElementById("scheduled-options");
+    if (sw) {
+      sw.classList.toggle("on", cfg.scheduledTakeover);
+      sw.setAttribute("aria-checked", String(cfg.scheduledTakeover));
+    }
+    var offNote = document.getElementById("scheduled-off-note");
+    if (offNote) offNote.style.display = cfg.scheduledTakeover ? "none" : "";
+    if (options) {
+      options.style.opacity = cfg.scheduledTakeover ? "" : ".45";
+      options.style.pointerEvents = cfg.scheduledTakeover ? "" : "none";
+    }
+  }
+  bind("sw-scheduled-takeover", "click", function () {
+    var next = !cfg.scheduledTakeover;
+    setScheduledTakeover(next);
+    api("/api/config", { method: "POST", body: JSON.stringify({ scheduledTakeover: next }) })
+      .then(function () { flashTip("已保存 ✓", "ok"); })
+      .catch(function () { flashTip("保存失败，看 Hana 日志", "err"); });
+  });
+
+  // ── 断联提醒（回复异常中断）独立开关 ──
+  function setAbnormalEnabled(on) {
+    cfg.abnormalEnabled = !!on;
+    var sw = document.getElementById("sw-abnormal");
+    if (sw) {
+      sw.classList.toggle("on", cfg.abnormalEnabled);
+      sw.setAttribute("aria-checked", String(cfg.abnormalEnabled));
+    }
+  }
+  bind("sw-abnormal", "click", function () {
+    var next = !cfg.abnormalEnabled;
+    setAbnormalEnabled(next);
+    api("/api/config", { method: "POST", body: JSON.stringify({ abnormalEnabled: next }) })
+      .then(function () { flashTip("已保存 ✓", "ok"); })
+      .catch(function () { flashTip("保存失败，看 Hana 日志", "err"); });
+  });
+
+  // ── 静默时段 ──
+  bind("sw-quiet", "click", function () {
+    cfg.quietHours.enabled = !cfg.quietHours.enabled;
+    var sw = document.getElementById("sw-quiet");
+    var qt = document.getElementById("quiet-times");
+    if (sw) {
+      sw.classList.toggle("on", cfg.quietHours.enabled);
+      sw.setAttribute("aria-checked", String(cfg.quietHours.enabled));
+    }
+    if (qt) {
+      qt.style.opacity = cfg.quietHours.enabled ? "" : ".45";
+      qt.style.pointerEvents = cfg.quietHours.enabled ? "" : "none";
+    }
+    api("/api/config", { method: "POST", body: JSON.stringify({ quietHours: cfg.quietHours }) })
+      .then(function () { flashTip("已保存 ✓", "ok"); })
+      .catch(function () { flashTip("保存失败，看 Hana 日志", "err"); });
+  });
+  bind("in-qstart", "change", saveQuietTime);
+  bind("in-qend", "change", saveQuietTime);
+  function saveQuietTime() {
+    var qs = document.getElementById("in-qstart");
+    var qe = document.getElementById("in-qend");
+    cfg.quietHours.start = (qs && qs.value) || "22:00";
+    cfg.quietHours.end = (qe && qe.value) || "08:00";
+    api("/api/config", { method: "POST", body: JSON.stringify({ quietHours: cfg.quietHours }) })
+      .then(function () { flashTip("已保存 ✓", "ok"); })
+      .catch(function () { flashTip("保存失败，看 Hana 日志", "err"); });
+  }
+
+  // ── 按助手个性化（风格 + 音效） ──
+  var sndData = { files: [], agents: [], assignments: {}, styleAssignments: {}, triggerAssignments: {}, styles: [] };
+  var esc = function (s) {
+    return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  };
+  var sndVal = function (a) { return sndData.assignments[a.id] || "default"; };
+  var styleVal = function (a) { return sndData.styleAssignments[a.id] || "default"; };
+  var triggerVal = function (a) { return sndData.triggerAssignments[a.id] || "default"; };
+  // 提醒时机：default=跟随全局；其余四档按助手覆盖（聊天回复完成档）
+  var TRIGGER_OPTIONS = [
+    ["default", "跟随全局"],
+    ["always", "总是提醒"],
+    ["whenSessionUnfocused", "焦点不在该聊天时"],
+    ["whenUnfocused", "焦点不在 HanaAgent 时"],
+    ["never", "从不提醒"]
+  ];
+  function triggerOptions(a) {
+    var opts = "";
+    for (var i = 0; i < TRIGGER_OPTIONS.length; i++) {
+      var sel = triggerVal(a) === TRIGGER_OPTIONS[i][0] ? " selected" : "";
+      opts += '<option value="' + TRIGGER_OPTIONS[i][0] + '"' + sel + ">" + TRIGGER_OPTIONS[i][1] + "</option>";
+    }
+    return opts;
+  }
+
+  function styleOptions(a) {
+    // 按分组渲染 <optgroup>（beautify-select 面板里会变成手帐风组头 + 可收合）
+    var groups = {};
+    var order = [];
+    for (var i = 0; i < sndData.styles.length; i++) {
+      var st = sndData.styles[i];
+      var g = st.group || "normal";
+      if (!groups[g]) { groups[g] = { label: st.groupLabel || "其他", items: [] }; order.push(g); }
+      groups[g].items.push(st);
+    }
+    var opts = "";
+    for (var gi = 0; gi < order.length; gi++) {
+      var grp = groups[order[gi]];
+      opts += '<optgroup label="' + esc(grp.label) + '">';
+      for (var j = 0; j < grp.items.length; j++) {
+        var st2 = grp.items[j];
+        var sel = styleVal(a) === st2.id ? " selected" : "";
+        opts += '<option value="' + esc(st2.id) + '"' + sel + ">" + esc(st2.label) + "</option>";
+      }
+      opts += "</optgroup>";
+    }
+    return opts;
+  }
+
+  function sndOptions(a) {
+    var opts = '<option value="default">系统默认</option><option value="silent">静音</option>';
+    for (var i = 0; i < sndData.files.length; i++) {
+      var f = sndData.files[i];
+      var sel = sndVal(a) === f ? " selected" : "";
+      opts += '<option value="' + esc(f) + '"' + sel + ">" + esc(f) + "</option>";
+    }
+    return opts;
+  }
+
+  function loadSounds() {
+    api("/api/sounds")
+      .then(function (r) {
+        sndData = {
+          files: r.files || [],
+          agents: r.agents || [],
+          assignments: r.assignments || {},
+          styleAssignments: r.styleAssignments || {},
+          triggerAssignments: r.triggerAssignments || {},
+          styles: r.styles || [],
+          hiddenAgents: r.hiddenAgents || []
+        };
+        if (r.soundError) showTip("snd-tip", r.soundError, 6000);
+        var dirIn = document.getElementById("in-snd-dir");
+        if (dirIn) dirIn.value = r.customDir || "";
+        var list = document.getElementById("snd-list");
+        if (!list) return;
+        if (r.agentsError) {
+          list.innerHTML = '<div class="empty">' + esc(r.agentsError) + '</div>';
+          return;
+        }
+        if (sndData.agents.length === 0) {
+          list.innerHTML = '<div class="empty">没有找到助手</div>';
+          return;
+        }
+        var html = '<div class="snd-head"><span class="who"></span><span class="col-style">文案风格</span><span class="col-sound">音效</span><span class="col-trigger">提醒时机</span><span class="col-action" aria-hidden="true"></span></div>';
+        for (var i = 0; i < sndData.agents.length; i++) {
+          var a = sndData.agents[i];
+          html += '<div class="snd-row"><span class="who">' + esc(a.name) + "</span>" +
+            '<select data-agent="' + esc(a.id) + '" data-kind="style">' + styleOptions(a) + "</select>" +
+            '<select data-agent="' + esc(a.id) + '" data-kind="sound">' + sndOptions(a) + "</select>" +
+            '<select data-agent="' + esc(a.id) + '" data-kind="trigger" title="聊天回复完成按这个档位提醒；跟随全局=用上面全局档位">' + triggerOptions(a) + "</select>" +
+            '<span class="snd-actions"><button class="mini" data-preview="' + esc(a.id) + '">看看效果</button></span></div>';
+        }
+        list.innerHTML = html;
+        list.querySelectorAll("select").forEach(function (sel) { beautifySelect(sel); });
+        list.querySelectorAll("select").forEach(function (sel) {
+          sel.addEventListener("change", function () {
+            var kind = sel.dataset.kind;
+            var path = kind === "style" ? "/api/agents/style" : kind === "trigger" ? "/api/agents/trigger" : "/api/sounds/assign";
+            api(path, {
+              method: "POST",
+              body: JSON.stringify({ agentId: sel.dataset.agent, value: sel.value })
+            }).then(function (rr) {
+              if (rr.ok && kind === "style") sndData.styleAssignments = rr.assignments || {};
+              if (rr.ok && kind === "sound") sndData.assignments = rr.assignments || {};
+              if (rr.ok && kind === "trigger") sndData.triggerAssignments = rr.assignments || {};
+              showTip("snd-tip", rr.ok ? "已保存 ✓" : "保存失败：" + (rr.error || "未知原因"), rr.ok ? 1500 : 3000);
+            }).catch(function () { showTip("snd-tip", "保存失败", 3000); });
+          });
+        });
+        list.querySelectorAll("[data-preview]").forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            var aid = btn.dataset.preview;
+            // 所见即所得：直接读下拉控件当前选中值（不等保存时序），没有对应控件才回退已保存配置
+            var styleSel = list.querySelector('select[data-kind="style"][data-agent="' + aid + '"]');
+            var soundSel = list.querySelector('select[data-kind="sound"][data-agent="' + aid + '"]');
+            var styleValue = styleSel ? styleSel.value : (sndData.styleAssignments[aid] || "default");
+            var value = soundSel ? soundSel.value : (sndData.assignments[aid] || "default");
+            api("/api/sound/preview", {
+              method: "POST",
+              body: JSON.stringify({ agentId: aid, file: value === "default" ? "" : value, style: styleValue })
+            }).then(function (rr) {
+              showTip("snd-tip", rr.sent ? "提醒已提交，留意弹窗和提示音" : "发送失败", 2500);
+            }).catch(function () { showTip("snd-tip", "请求失败", 3000); });
+          });
+        });
+        // 隐藏助手：从列表移除（数据保留，恢复入口在「管理隐藏助手」）
+        // （v0.4.22 起隐藏管理收敛到「管理助手」弹层勾选，行内不再有隐藏按钮）
+      })
+      .catch(function (e) { showTip("snd-tip", "加载失败：" + e.message, 4000); });
+  }
+  bind("btn-refresh-sounds", "click", loadSounds);
+  loadSounds();
+
+  // ── 管理助手：全量助手列表 + 勾选控制显示/隐藏（勾=显示，不勾=隐藏，数据一直保留） ──
+  bind("btn-manage-hidden", "click", function () {
+    var box = document.getElementById("hidden-list");
+    if (!box) return;
+    if (box.style.display !== "none") {
+      box.style.display = "none";
+      return;
+    }
+    // 全量读磁盘（含隐藏的），展示所有助手 + 勾选状态
+    api("/api/agents/all")
+      .then(function (r) {
+        if (!r || !r.ok) {
+          box.innerHTML = '<div class="empty">' + esc((r && r.error) || "读取伙伴名单失败") + '</div>';
+          box.style.display = "block";
+          return;
+        }
+        var allAgents = (r.agents || []);
+        var hidden = (sndData.hiddenAgents || []);
+        var hiddenSet = {};
+        for (var i = 0; i < hidden.length; i++) hiddenSet[hidden[i]] = true;
+        if (!allAgents.length) {
+          box.innerHTML = '<div class="empty">没有找到助手</div>';
+          box.style.display = "block";
+          return;
+        }
+        var html = '<div class="hidden-agents-title">勾选 = 在列表显示；不勾 = 隐藏（数据保留）</div>';
+        for (var j = 0; j < allAgents.length; j++) {
+          var a = allAgents[j];
+          var checked = !hiddenSet[a.id];
+          html += '<div class="hidden-agent-row">' +
+            '<label class="hide-check"><input type="checkbox" data-visible="' + esc(a.id) + '"' + (checked ? " checked" : "") + ">" +
+            '<span class="hide-check-box"></span></label>' +
+            '<span class="hide-name">' + esc(a.name) + '</span>' +
+            '<span class="hint">' + esc(a.id) + "</span></div>";
+        }
+        box.innerHTML = html;
+        box.style.display = "block";
+        // 勾选变化 → 实时保存（勾上=显示=取消隐藏；不勾=隐藏）
+        box.querySelectorAll("[data-visible]").forEach(function (cb) {
+          cb.addEventListener("change", function () {
+            var id = cb.dataset.visible;
+            var visible = cb.checked;
+            api(visible ? "/api/agents/unhide" : "/api/agents/hide", {
+              method: "POST",
+              body: JSON.stringify({ agentId: id })
+            }).then(function (rr) {
+              if (rr && rr.ok) {
+                sndData.hiddenAgents = rr.hiddenAgents || [];
+                showTip("snd-tip", visible ? "已显示" : "已隐藏，数据保留", 1800);
+                loadSounds(); // 主列表同步
+              } else {
+                showTip("snd-tip", (rr && rr.error) || "保存失败", 3000);
+                cb.checked = !visible; // 回滚
+              }
+            }).catch(function () { showTip("snd-tip", "保存失败", 3000); cb.checked = !visible; });
+          });
+        });
+      })
+      .catch(function () { showTip("snd-tip", "加载失败", 3000); });
+  });
+
+  // ── 自定义音效文件夹：保存后刷新音效列表（文件可能变了） ──
+  bind("btn-save-snd-dir", "click", function () {
+    var input = document.getElementById("in-snd-dir");
+    var val = input ? input.value.trim() : "";
+    showTip("snd-tip", "保存中…", 1500);
+    api("/api/sounds/dir", {
+      method: "POST",
+      body: JSON.stringify({ dir: val })
+    }).then(function (r) {
+      if (!r || !r.ok) {
+        showTip("snd-tip", (r && r.error) || "保存失败", 4000);
+        return;
+      }
+      showTip("snd-tip", "已保存", 2000);
+      loadSounds(); // 刷新目录显示 + 音效列表（文件可能变了）
+    }).catch(function (e) { showTip("snd-tip", "保存失败：" + e.message, 4000); });
+  });
+
+  // ── 原生文件夹选择：弹 Windows 选择框 → 自动保存 → 刷新 ──
+  bind("btn-pick-snd-dir", "click", function () {
+    var input = document.getElementById("in-snd-dir");
+    var cur = input ? input.value.trim() : "";
+    showTip("snd-tip", "请在弹出的窗口里选文件夹…", 4000);
+    api("/api/sounds/pick-folder", {
+      method: "POST",
+      body: JSON.stringify({ initial: cur }),
+      signal: AbortSignal.timeout(300000)
+    }).then(function (r) {
+      if (!r || !r.ok) {
+        showTip("snd-tip", (r && r.error) || "没有选择文件夹", 3000);
+        return;
+      }
+      showTip("snd-tip", "已切换音效文件夹", 2000);
+      loadSounds(); // 回显新路径 + 刷新音效列表
+    }).catch(function (e) { showTip("snd-tip", "选择失败：" + e.message, 3000); });
+  });
+
+  // ── 文案润色（可选高级档）：开关 + 三档模型配置 + 显式保存 + 测试 ──
+  var refineState = { source: "agent", enabled: false, hanaModel: {} };
+  // sticky=true 时提示常驻（测试结果要一直能看到），普通提示 4 秒自动清
+  function refineSetTip(text, kind, sticky) {
+    var el = document.getElementById("refine-tip");
+    if (!el) return;
+    el.textContent = text || "";
+    el.className = "hint" + (kind === "ok" ? " tip-ok" : kind === "err" ? " tip-err" : "");
+    if (!sticky && text) setTimeout(function () { el.textContent = ""; el.className = "hint"; }, 4000);
+  }
+
+  function refineSetEnabled(on) {
+    refineState.enabled = on;
+    var sw = document.getElementById("sw-refine");
+    var box = document.getElementById("refine-box");
+    if (sw) {
+      sw.classList.toggle("on", on);
+      sw.setAttribute("aria-checked", String(on));
+    }
+    if (box) box.style.cssText = on ? "" : "opacity:.45;pointer-events:none;";
+  }
+
+  function refineRenderSource() {
+    var note = document.getElementById("refine-agent-note");
+    var hanaBox = document.getElementById("refine-hana-box");
+    var customBox = document.getElementById("refine-custom-box");
+    if (note) note.style.display = refineState.source === "agent" ? "" : "none";
+    if (hanaBox) hanaBox.style.display = refineState.source === "hana" ? "" : "none";
+    if (customBox) customBox.style.display = refineState.source === "custom" ? "" : "none";
+    var seg = document.getElementById("seg-refine-source");
+    if (seg) seg.querySelectorAll(".seg-btn").forEach(function (b) {
+      b.classList.toggle("on", b.dataset.source === refineState.source);
+    });
+  }
+
+  function refineFillModels(selectedModelId) {
+    var pid = document.getElementById("sel-refine-provider").value;
+    var modelSel = document.getElementById("sel-refine-model");
+    if (!pid || !modelSel) return;
+    api("/api/refine/hana-models").then(function (r) {
+      var p = null;
+      for (var i = 0; i < (r.models || []).length; i++) {
+        if (r.models[i].providerId === pid) { p = r.models[i]; break; }
+      }
+      var html = '<option value="">选择模型…</option>';
+      for (var i = 0; i < (p ? p.models : []).length; i++) {
+        html += '<option value="' + p.models[i].id + '">' + p.models[i].name + "</option>";
+      }
+      modelSel.innerHTML = html;
+      if (selectedModelId) modelSel.value = selectedModelId;
+    }).catch(function () {});
+  }
+
+  function refineLoadHanaModels() {
+    api("/api/refine/hana-models").then(function (r) {
+      var sel = document.getElementById("sel-refine-provider");
+      if (!sel || !r.models || !r.models.length) return;
+      var html = '<option value="">选择供应商…</option>';
+      for (var i = 0; i < r.models.length; i++) {
+        html += '<option value="' + r.models[i].providerId + '">' + r.models[i].providerName + "</option>";
+      }
+      sel.innerHTML = html;
+      if (refineState.hanaModel && refineState.hanaModel.providerId) {
+        sel.value = refineState.hanaModel.providerId;
+        refineFillModels(refineState.hanaModel.modelId);
+      }
+    }).catch(function () {});
+  }
+
+  function refineCollectPatch() {
+    var patch = { modelSource: refineState.source };
+    if (refineState.source === "hana") {
+      patch.hanaModel = {
+        providerId: document.getElementById("sel-refine-provider").value,
+        modelId: document.getElementById("sel-refine-model").value
+      };
+    } else if (refineState.source === "custom") {
+      patch.customModel = {
+        baseUrl: document.getElementById("in-refine-base").value.trim(),
+        apiKey: document.getElementById("in-refine-key").value,
+        model: document.getElementById("in-refine-model").value.trim(),
+        api: document.getElementById("sel-refine-api").value
+      };
+    }
+    return patch;
+  }
+
+  function refineApplySaved(cfg) {
+    refineState.hanaModel = (cfg && cfg.hanaModel) || {};
+    var keyEl = document.getElementById("in-refine-key");
+    if (keyEl) {
+      keyEl.value = "";
+      keyEl.placeholder = cfg && cfg.customModel && cfg.customModel.apiKey ? "已保存（留空不修改）" : "API Key";
+    }
+  }
+
+  // 初始化：读开关 + 模型配置回填
+  api("/api/refine").then(function (r) {
+    if (!r || !r.config) return;
+    refineState.enabled = !!r.enabled;
+    refineState.source = r.config.source || "agent"; // 注意：sanitize 返回 source（不是 modelSource）
+    refineState.hanaModel = r.config.hanaModel || {};
+    refineSetEnabled(refineState.enabled);
+    refineRenderSource();
+    var cm = r.config.customModel || {};
+    var base = document.getElementById("in-refine-base");
+    var key = document.getElementById("in-refine-key");
+    var model = document.getElementById("in-refine-model");
+    var apiSel = document.getElementById("sel-refine-api");
+    if (base) base.value = cm.baseUrl || "";
+    if (key) key.placeholder = cm.apiKey ? "已保存（留空不修改）" : "API Key";
+    if (model) model.value = cm.model || "";
+    if (apiSel) {
+      apiSel.value = cm.api || "openai-completions";
+      // 外部改 select.value 不触发组件自动同步，手动刷新触发栏显示
+      var dd = apiSel.closest ? apiSel.closest(".dd") : null;
+      if (dd && dd._ddRefresh) dd._ddRefresh();
+    }
+    if (refineState.source === "hana") refineLoadHanaModels();
+  }).catch(function () {});
+
+  bind("sw-refine", "click", function () {
+    var next = !refineState.enabled;
+    api("/api/refine", { method: "POST", body: JSON.stringify({ enabled: next }) })
+      .then(function (r) {
+        if (r && r.ok) {
+          refineState.enabled = !!r.enabled;
+          refineSetEnabled(refineState.enabled);
+          refineSetTip("已保存 ✓", "ok");
+          if (refineState.enabled && refineState.source === "hana") refineLoadHanaModels();
+        } else {
+          refineSetTip("保存失败：" + ((r && r.error) || "接口没有确认保存"), "err", true);
+        }
+      }).catch(function (e) { refineSetTip("保存失败：" + (e.message || "请求失败"), "err", true); });
+  });
+
+  var segRefine = document.getElementById("seg-refine-source");
+  if (segRefine) {
+    // 只切显示，不自动保存（点「保存配置」才落盘）
+    segRefine.addEventListener("click", function (e) {
+      var btn = e.target.closest ? e.target.closest(".seg-btn[data-source]") : null;
+      if (!btn) return;
+      refineState.source = btn.dataset.source;
+      refineRenderSource();
+      if (refineState.source === "hana") refineLoadHanaModels();
+    });
+  }
+
+  bind("sel-refine-provider", "change", function () { refineFillModels(); });
+  bind("sel-refine-model", "change", function () { /* 值在保存时收集 */ });
+
+  // 保存配置：一次提交当前表单值（Key 留空不覆盖已存）
+  bind("btn-refine-save", "click", function () {
+    api("/api/refine/model", { method: "POST", body: JSON.stringify(refineCollectPatch()) })
+      .then(function (r) {
+        if (r && r.ok) {
+          refineApplySaved(r.config);
+          refineSetTip("已保存 ✓", "ok");
+        } else {
+          refineSetTip("保存失败：" + ((r && r.error) || "未知错误"), "err", true);
+        }
+      }).catch(function () { refineSetTip("保存失败", "err"); });
+  });
+
+  // 测试一下：按钮态反馈 + 结果常驻显示（成功/失败都看得到）
+  bind("btn-refine-test", "click", function () {
+    var btn = document.getElementById("btn-refine-test");
+    btn.disabled = true;
+    var old = btn.textContent;
+    btn.textContent = "测试中…";
+    refineSetTip("", "");
+    api("/api/refine/test", {
+      method: "POST",
+      body: JSON.stringify({ source: refineState.source, patch: refineCollectPatch() }),
+      signal: AbortSignal.timeout(50000)
+    })
+      .then(function (r) {
+        if (r && r.ok) {
+          refineSetTip("✓ 测试成功啦！", "ok", true);
+        } else {
+          refineSetTip("✗ 失败：" + ((r && r.error) || "未知错误"), "err", true);
+        }
+      })
+      .catch(function () { refineSetTip("✗ 请求失败", "err", true); })
+      .then(function () { btn.disabled = false; btn.textContent = old; });
+  });
+}
+</script>
+<script>
+
+  // ── 启动：先把配置拉回来填进页面，再跑页面自己的绑定逻辑 ──
+  (function () {
+    function getJson(path) {
+      var clean = path.charAt(0) === "/" ? path.slice(1) : path;
+      return window.hana.api.fetch(clean, { signal: AbortSignal.timeout(8000) })
+        .then(function (r) {
+          if (r.ok) return r.json();
+          return r.json().catch(function () { return {}; }).then(function (body) {
+            throw new Error((body && body.error) || ("请求失败（HTTP " + r.status + "）"));
+          });
+        });
+    }
+
+    // 服务端渲染那套插值没有了，这里按真实配置把初始状态调准
+    function applyCfgToDom(cfg) {
+      var qh = cfg.quietHours || DEFAULT_QUIET;
+
+      function segOn(segId, want) {
+        var seg = document.getElementById(segId);
+        if (!seg) return;
+        var btns = seg.querySelectorAll(".seg-btn");
+        for (var i = 0; i < btns.length; i++) {
+          var key = btns[i].dataset.trigger || btns[i].dataset.duration;
+          btns[i].classList.toggle("on", key === want);
+        }
+      }
+      segOn("seg-chat", cfg.chatTrigger);
+      segOn("seg-scheduled", cfg.scheduledTrigger);
+      segOn("seg-patrol", cfg.patrolTrigger);
+      segOn("seg-duration", cfg.toastDuration);
+
+      function sw(id, on) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        el.classList.toggle("on", !!on);
+        el.setAttribute("aria-checked", on ? "true" : "false");
+      }
+      sw("sw-abnormal", cfg.abnormalEnabled);
+      sw("sw-scheduled-takeover", cfg.scheduledTakeover);
+      sw("sw-refine", cfg.refineEnabled);
+      sw("sw-quiet", qh.enabled);
+
+      function dim(id, active) {
+        var el = document.getElementById(id);
+        if (el) el.style.cssText = active ? "" : "opacity:.45;pointer-events:none;";
+      }
+      dim("scheduled-options", cfg.scheduledTakeover);
+      dim("refine-box", cfg.refineEnabled);
+      dim("quiet-times", qh.enabled);
+
+      var note = document.getElementById("scheduled-off-note");
+      if (note) note.style.display = cfg.scheduledTakeover ? "none" : "";
+
+      var qs = document.getElementById("in-qstart");
+      var qe = document.getElementById("in-qend");
+      if (qs) qs.value = qh.start || "22:00";
+      if (qe) qe.value = qh.end || "08:00";
+
+      var tip = document.getElementById("first-tip-card");
+      if (tip) {
+        var anyOn = cfg.chatTrigger !== "never"
+          || (cfg.scheduledTakeover && cfg.scheduledTrigger !== "never")
+          || cfg.patrolTrigger !== "never";
+        tip.style.display = anyOn ? "" : "none";
+      }
+    }
+
+    // 版本号从后端拿，免得发版时忘了改页面里的硬编码
+    getJson("api/version").then(function (out) {
+      var el = document.getElementById("about-version");
+      if (el && out && out.version) el.textContent = "v" + out.version;
+    }).catch(function () {});
+
+    getJson("api/config").then(function (out) {
+      var cfg = (out && out.config) || {};
+      window.__CFG__ = cfg;
+      cfg.quietHours = cfg.quietHours || DEFAULT_QUIET;
+      window.__DEFAULT_QUIET__ = DEFAULT_QUIET;
+      applyCfgToDom(cfg);
+      boot();
+    }).catch(function (error) {
+      document.body.innerHTML = '<div style="padding:24px 22px;font:14px/1.7 \'Microsoft YaHei\',system-ui,sans-serif;color:#6E7770">设置页没能打开：'
+        + (error && error.message ? error.message : error) + "</div>";
+    });
+  })();
+
+</script>
+</body>
+</html>

@@ -1,0 +1,231 @@
+/* feedback · ui/feedback.css — 提个醒专用反馈弹窗 */
+
+.tg-feedback-open {
+  padding: 6px 14px;
+  border: 1px solid var(--line, rgba(93, 122, 107, .20));
+  border-radius: 999px;
+  background: var(--card, #FBFCF8);
+  color: var(--ink, #454B43);
+  font-size: 13px;
+  cursor: pointer;
+}
+.tg-feedback-open:hover { background: var(--accent-soft, #E4F0EA); }
+
+.tg-feedback-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+.tg-feedback-modal[hidden] { display: none; }
+
+.tg-feedback-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(40, 32, 24, .45);
+}
+
+/* 纯色纸面：保留柔和圆角，但不依赖边框或阴影制造层次。 */
+.tg-feedback-dialog {
+  position: relative;
+  z-index: 1;
+  width: min(460px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background-color: var(--card, #FBFCF8);
+  background-image: none;
+  border: 0;
+  border-radius: 18px;
+  outline: 0;
+  box-shadow: none;
+  filter: none;
+  color: var(--ink, #454B43);
+}
+.tg-feedback-dialog,
+.tg-feedback-dialog::before,
+.tg-feedback-dialog::after { box-shadow: none; }
+
+.tg-feedback-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 12px;
+  background-color: var(--card, #FBFCF8);
+  border: 0;
+}
+.tg-feedback-titles { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.tg-feedback-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--accent-deep, #4A9277);
+}
+.tg-feedback-sub {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink-soft, #6E7770);
+}
+.tg-feedback-close {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-soft, #6E7770);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+.tg-feedback-close:hover { background: var(--accent-soft, #E4F0EA); color: var(--accent-deep, #4A9277); }
+
+.tg-feedback-messages {
+  flex: 1;
+  min-height: 180px;
+  max-height: 40vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 18px 12px;
+  background-color: var(--card, #FBFCF8);
+}
+.tg-feedback-welcome {
+  margin: 10px 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--ink-soft, #6E7770);
+  white-space: pre-line;
+  text-align: center;
+}
+.tg-feedback-bubble {
+  max-width: 82%;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.tg-feedback-bubble-user {
+  align-self: flex-end;
+  background: var(--warn-soft, #FBF3E4);
+  color: var(--ink, #454B43);
+}
+.tg-feedback-bubble-assistant {
+  align-self: flex-start;
+  background: #F5F1EA;
+  color: var(--ink, #454B43);
+}
+.tg-feedback-bubble-thinking {
+  align-self: flex-start;
+  font-size: 12px;
+  color: var(--ink-soft, #6E7770);
+}
+.tg-feedback-bubble-error {
+  align-self: flex-start;
+  font-size: 12px;
+  color: #B3543F;
+}
+
+.tg-feedback-preview {
+  flex: 0 1 auto;
+  max-height: 32vh;
+  overflow-y: auto;
+  margin: 0 18px 10px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 0;
+  background: var(--warn-soft, #FBF3E4);
+  color: var(--ink, #454B43);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.tg-feedback-preview-title { margin-bottom: 6px; font-weight: 600; }
+.tg-feedback-preview-item { margin-top: 4px; }
+.tg-feedback-preview-item ol { margin: 4px 0 0 18px; padding: 0; }
+.tg-feedback-preview-env { margin-top: 6px; }
+.tg-feedback-preview-env summary { cursor: pointer; color: var(--ink-soft, #6E7770); }
+.tg-feedback-preview-env pre {
+  margin: 6px 0 0;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--ink-soft, #6E7770);
+}
+
+.tg-feedback-input-row {
+  display: flex;
+  gap: 8px;
+  padding: 10px 18px 12px;
+  background-color: var(--card, #FBFCF8);
+}
+.tg-feedback-input-row textarea {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  padding: 8px 10px;
+  border: 1px solid var(--line, rgba(93, 122, 107, .20));
+  border-radius: 8px;
+  background: #FFF;
+  color: var(--ink, #454B43);
+  font-size: 13px;
+  font-family: inherit;
+  box-sizing: border-box;
+  box-shadow: none;
+}
+.tg-feedback-input-row textarea:focus {
+  outline: 2px solid rgba(93, 174, 142, .24);
+  border-color: var(--accent, #5DAE8E);
+}
+.tg-feedback-send {
+  flex: 0 0 auto;
+  align-self: stretch;
+  padding: 8px 16px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent, #5DAE8E);
+  color: #FFF;
+  font-size: 13px;
+  cursor: pointer;
+}
+.tg-feedback-send:disabled { opacity: .6; cursor: default; }
+.tg-feedback-send:hover:not(:disabled) { background: var(--accent-deep, #4A9277); }
+
+.tg-feedback-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 0 18px 16px;
+  background-color: var(--card, #FBFCF8);
+}
+.tg-feedback-actions[hidden] { display: none; }
+.tg-feedback-btn {
+  padding: 7px 14px;
+  border: 1px solid var(--line, rgba(93, 122, 107, .20));
+  border-radius: 8px;
+  background: var(--card, #FBFCF8);
+  color: var(--ink, #454B43);
+  font-size: 13px;
+  cursor: pointer;
+}
+.tg-feedback-btn:hover { border-color: var(--accent, #5DAE8E); background: var(--accent-soft, #E4F0EA); }
+.tg-feedback-btn-primary { border-color: var(--accent, #5DAE8E); background: var(--accent, #5DAE8E); color: #FFF; }
+.tg-feedback-btn-primary:hover { border-color: var(--accent-deep, #4A9277); background: var(--accent-deep, #4A9277); }
+.tg-feedback-actions-hint { font-size: 11px; color: var(--ink-soft, #6E7770); }
+
+@media (max-height: 600px) {
+  .tg-feedback-dialog { max-height: calc(100vh - 20px); }
+  .tg-feedback-head { padding: 10px 14px 8px; }
+  .tg-feedback-messages { min-height: 88px; max-height: 24vh; padding: 10px 14px; }
+  .tg-feedback-preview { max-height: 22vh; margin-left: 14px; margin-right: 14px; }
+  .tg-feedback-input-row { padding-left: 14px; padding-right: 14px; }
+  .tg-feedback-actions { padding-left: 14px; padding-right: 14px; }
+}

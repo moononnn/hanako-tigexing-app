@@ -1,0 +1,36 @@
+{
+  "manifestVersion": 2,
+  "id": "tigexing-app",
+  "name": "提个醒",
+  "version": "0.0.16",
+  "entry": "index.js",
+  "description": "回复完成自动弹系统通知，同窗口多条合并、跨窗口分开提醒，带静默时段和按伙伴个性化的音效与通知风格。",
+  "capabilities": [
+    "app/notifications.show",
+    "app/process.spawn",
+    "app/models.read",
+    "app/models.infer",
+    "app/agents.read",
+    "app/resources.read",
+    "app/sessions.read"
+  ],
+  "contributes": {
+    "cards": [
+      {
+        "id": "settings",
+        "title": "提个醒",
+        "description": "回复完成自动弹系统通知，同窗口多条合并、跨窗口分开提醒",
+        "route": "/settings.html",
+        "realization": "page",
+        "siteNavEntry": true,
+        "cardForm": "flush",
+        "face": {
+          "image": "assets/icon.png"
+        },
+        "pageIcon": "assets/nav-icon.png"
+      }
+    ]
+  },
+  "icon": "assets/icon.png",
+  "minAppVersion": "0.1059.0"
+}

@@ -1,0 +1,83 @@
+// 不发真实通知，不改系统注册表；用假子进程覆盖提交确认与备用通道。
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
+import { fileURLToPath } from 'node:url';
+import { sendToast, deliverToast } from '../lib/toast.js';
+
+const pluginDir = fileURLToPath(new URL('../', import.meta.url));
+const options = { pluginDir, title: '窗口标题 · 伙伴回信', message: '正文', duration: 'long' };
+function fakeProcess(run) {
+  let spawned;
+  let killed = false;
+  const spawnProcess = (command, args, opts) => {
+    spawned = { command, args, opts };
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.kill = () => { killed = true; child.emit('close', null, 'SIGTERM'); };
+    queueMicrotask(() => run(child));
+    return child;
+  };
+  return { dependencies: { spawnProcess, timeoutMs: 100 }, get spawned() { return spawned; }, get killed() { return killed; } };
+}
+
+test('收到脚本提交标记才返回成功，标记可跨输出分块', async () => {
+  const fake = fakeProcess((child) => {
+    child.stdout.write('TXS_TOAST_SUB');
+    child.stdout.write('MITTED\r\n');
+    child.emit('close', 0);
+  });
+  assert.equal(await sendToast(options, fake.dependencies), true);
+  assert.deepEqual(fake.spawned.opts.stdio, ['ignore', 'pipe', 'pipe']);
+  assert.equal(fake.spawned.opts.env.TXS_DURATION, 'long');
+});
+
+test('进程退出0但没有提交确认，不能当发送成功', async () => {
+  const fake = fakeProcess((child) => child.emit('close', 0));
+  assert.equal(await sendToast(options, fake.dependencies), false);
+});
+
+test('失败时保留脚本错误与退出原因', async () => {
+  const logs = [];
+  const fake = fakeProcess((child) => { child.stderr.write('DisabledForApplication'); child.emit('close', 1); });
+  assert.equal(await sendToast({ ...options, log: { error: (...args) => logs.push(args) } }, fake.dependencies), false);
+  assert.match(logs[0][1].stderr, /DisabledForApplication/);
+  assert.match(logs[0][1].error, /code=1/);
+});
+
+test('异步启动失败返回失败', async () => {
+  const fake = fakeProcess((child) => child.emit('error', new Error('spawn denied')));
+  assert.equal(await sendToast(options, fake.dependencies), false);
+});
+
+test('同步启动失败返回失败', async () => {
+  assert.equal(await sendToast(options, { spawnProcess() { throw new Error('denied'); } }), false);
+});
+
+test('超时终止未确认的进程', async () => {
+  const fake = fakeProcess(() => {});
+  assert.equal(await sendToast(options, { ...fake.dependencies, timeoutMs: 10 }), false);
+  assert.equal(fake.killed, true);
+});
+
+test('脚本失败走宿主备用通道，保留相同标题正文', async () => {
+  const fake = fakeProcess((child) => child.emit('close', 1));
+  const received = [];
+  const result = await deliverToast(options, async (input) => { received.push(input); }, fake.dependencies);
+  assert.deepEqual(result, { sent: true, via: 'host' });
+  assert.deepEqual(received, [{ title: options.title, body: options.message }]);
+});
+
+test('脚本已提交后不重复发送备用通知', async () => {
+  const fake = fakeProcess((child) => { child.stdout.write('TXS_TOAST_SUBMITTED\n'); child.emit('close', 0); });
+  const result = await deliverToast(options, () => { throw new Error('不得调用'); }, fake.dependencies);
+  assert.deepEqual(result, { sent: true, via: 'powershell' });
+});
+
+test('两个通道均失败时准确返回失败', async () => {
+  const fake = fakeProcess((child) => child.emit('close', 1));
+  const result = await deliverToast(options, async () => { throw new Error('permission denied'); }, fake.dependencies);
+  assert.deepEqual(result, { sent: false, via: 'failed' });
+});
