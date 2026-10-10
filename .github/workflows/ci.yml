@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    env:
+      # 本机开发在 UTC+8，通知合并窗口、静默时段这些断言跟时区绑着；跑 UTC 会挂。
+      TZ: Asia/Shanghai
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: 语法检查
+        shell: pwsh
+        run: |
+          $root = (Get-Location).Path
+          $files = @('index.js')
+          foreach ($dir in @('lib', 'routes', 'ui', 'assets', 'tests')) {
+            if (Test-Path $dir) {
+              $files += Get-ChildItem $dir -Recurse -Filter *.js -File |
+                ForEach-Object { $_.FullName.Substring($root.Length + 1) }
+            }
+          }
+          Write-Host "共 $($files.Count) 个文件"
+          foreach ($f in $files) {
+            node --check $f
+            if ($LASTEXITCODE -ne 0) { throw "语法检查失败：$f" }
+          }
+
+      - name: PowerShell 脚本语法
+        shell: pwsh
+        run: |
+          foreach ($p in @('lib/notify.ps1', 'lib/pick-folder.ps1')) {
+            if (-not (Test-Path $p)) { continue }
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p).Path, [ref]$null, [ref]$errors)
+            if ($errors) {
+              $errors | ForEach-Object { Write-Host $_ }
+              throw "PowerShell 语法检查失败：$p"
+            }
+          }
+
+      - name: 全量测试
+        shell: pwsh
+        # 不给名单：Node 自己递归找（tests/ 顶层 + lib/ 里积木自带的 tests/）。
+        # 显式写 tests/*.test.js 会漏掉积木自带的那几份用例。
+        # 测试跑在隔离的数据目录里，不碰 runner 上的真实用户目录。
+        run: |
+          $env:HANA_HOME = Join-Path $env:RUNNER_TEMP "hana-home"
+          New-Item -ItemType Directory -Path $env:HANA_HOME -Force | Out-Null
+          node --test
