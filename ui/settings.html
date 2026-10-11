@@ -552,7 +552,7 @@
   
   <div class="card" style="border-color:var(--warn);background:var(--warn-soft)">
     <h2>小提示</h2>
-    <div class="hint">这一版提个醒只接管 <b>聊天回复完成</b> 提醒：为避免和 Hana 原版通知双弹，可以把 Hana 设置里「聊天回复完成」那条原版通知设为 <b>从不</b>。<b>「计划任务完成」和「巡检完成」这两条请不要关</b>，提个醒这一版还没接上它们，关了就没人提醒你了（下面这两块里的开关和档位目前也不生效）。</div>
+    <div class="hint">提个醒现在接管 <b>聊天回复、计划任务和巡检完成</b>三类提醒。为避免聊天回复双弹，可以把 Hana 设置里「聊天回复完成」那条原版通知设为「从不」。计划任务和巡检都会留一点时间识别 Hana 原版通知；检测到同一活动已有原版通知时，提个醒就跳过补弹。</div>
   </div>
   
 
@@ -585,7 +585,7 @@
       <div class="btn-row" style="justify-content:space-between;margin-bottom:10px">
         <div>
           <div style="font-size:14px">接管计划任务提醒</div>
-          <div class="hint"><b>这一版还没接上计划任务的接管</b>：这个开关和下面的档位目前都不生效，也不会补弹通知。请保持 Hana 设置里「计划任务完成」的原版通知开启，别关。</div>
+          <div class="hint">开启后按下面的档位提醒；如果 Hana 原版已经提醒了同一任务，提个醒会跳过补弹，避免重复。</div>
           <div class="hint" id="scheduled-off-note" style="display:none;">已关闭：提个醒不补发计划任务通知；任务自己的通知仍照常显示。重新打开会恢复之前选的提醒时机。</div>
         </div>
         <button type="button" class="switch on" id="sw-scheduled-takeover" role="switch" aria-checked="true" aria-label="接管计划任务提醒"></button>
@@ -601,7 +601,7 @@
 
     <div class="mode-block">
       <div class="mode-name">巡检完成</div>
-      <div class="hint" style="margin-bottom:8px"><b>这一版还没接上巡检完成的接管</b>，下面的档位目前不生效；请保持 Hana 设置里「巡检完成」的原版通知开启，别关。</div>
+      <div class="hint" style="margin-bottom:8px">巡检完成会按下面的档位提醒；若检测到 Hana 已发出同一巡检的原版通知，提个醒会跳过补弹，避免重复。</div>
       <div class="seg" id="seg-patrol">
         <button class="seg-btn " data-trigger="always">总是提醒<span class="seg-desc">巡检跑完就弹，不管 Hana 在不在前台</span></button>
         <button class="seg-btn on" data-trigger="whenUnfocused">焦点不在 HanaAgent 时<span class="seg-desc">正在用 Hana 就不提醒，切走才提醒（推荐）</span></button>

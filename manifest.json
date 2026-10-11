@@ -2,9 +2,9 @@
   "manifestVersion": 2,
   "id": "tigexing-app",
   "name": "提个醒",
-  "version": "0.0.18",
+  "version": "0.0.19",
   "entry": "index.js",
-  "description": "回复完成自动弹系统通知，同窗口多条合并、跨窗口分开提醒，带静默时段和按伙伴个性化的音效与通知风格。",
+  "description": "伙伴回复、计划任务和巡检完成时按设置提醒，可按伙伴个性化音效，并设置提醒档位与静默时段。",
   "capabilities": [
     "app/notifications.show",
     "app/process.spawn",
@@ -19,7 +19,7 @@
       {
         "id": "settings",
         "title": "提个醒",
-        "description": "回复完成自动弹系统通知，同窗口多条合并、跨窗口分开提醒",
+        "description": "伙伴回复、计划任务和巡检完成时按设置弹出通知",
         "route": "/settings.html",
         "realization": "page",
         "siteNavEntry": true,

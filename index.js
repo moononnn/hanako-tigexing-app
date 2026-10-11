@@ -11,17 +11,22 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { Notifier, resolveChatTrigger } from './lib/policy.js';
+import { Notifier, isInQuietHours, resolveChatTrigger } from './lib/policy.js';
 import { createConfigManager } from './lib/config.js';
 import { deliverToast } from './lib/toast.js';
 import {
   parseTurnEnd,
+  parseActivityUpdate,
   parseSessionBackgroundTask,
   sessionIdFromPath,
   shouldNotifyCompletedTurn,
   isUserInitiatedAbortReason
 } from './lib/event-parse.js';
-import { ActivityNotificationTracker } from './lib/activity-notify.js';
+import {
+  ActivityNotificationTracker,
+  buildActivityNotification,
+  resolveActivitySessionPath
+} from './lib/activity-notify.js';
 import { isHanaFocused } from './lib/window-focus.js';
 import { getStyle, sessionPrefix } from './lib/style.js';
 import { BackgroundTaskTracker } from './lib/background-tasks.js';
@@ -36,6 +41,7 @@ import { SessionParticipation } from './lib/session-participation.js';
 export const name = 'tigexing-app';
 
 const APP_ID = 'tigexing-app';
+const ACTIVITY_NOTIFICATION_GRACE_MS = 1500;
 // 安装目录从模块自身位置推：入口就在应用根，lib/notify.ps1 在它下面。
 const INSTALL_DIR = path.dirname(fileURLToPath(import.meta.url));
 // 找不到伙伴头像时的兜底脸（notify.ps1 里也有一份同样的兜底）
@@ -209,6 +215,94 @@ export async function apply(ctx) {
     dbg(`通知提交结果 session=${decision.sessionId} kind=${decision.kind} via=${via} title=${title}`);
   }
 
+  async function handleActivityUpdate(activity) {
+    try {
+      let cfg = config.get();
+      const triggerKey = activity.kind === 'scheduled' ? 'scheduledTrigger' : 'patrolTrigger';
+      let trigger = cfg[triggerKey] || 'whenUnfocused';
+      if (!cfg.enabled || trigger === 'never') {
+        dbg(`活动提醒拦截 ${triggerKey}=${trigger} enabled=${cfg.enabled}`);
+        return;
+      }
+      if (activity.kind === 'scheduled' && !cfg.scheduledTakeover) {
+        dbg('活动提醒拦截 计划任务接管已关闭');
+        return;
+      }
+
+      const activitySessionPath = resolveActivitySessionPath(
+        agentsHome,
+        activity.agentId,
+        activity.sessionFile
+      );
+      // 原版完成通知可能紧跟 activity_update 到达；留出短暂窗口，让去重记录先落下。
+      if (activitySessionPath) {
+        await new Promise((resolve) => setTimeout(resolve, ACTIVITY_NOTIFICATION_GRACE_MS));
+        cfg = config.get();
+        trigger = cfg[triggerKey] || 'whenUnfocused';
+        if (!cfg.enabled || trigger === 'never' || (activity.kind === 'scheduled' && !cfg.scheduledTakeover)) {
+          dbg(`活动提醒等待后拦截 ${triggerKey}=${trigger} enabled=${cfg.enabled}`);
+          return;
+        }
+        if (activityNotifications.has(activitySessionPath)) {
+          dbg(`活动提醒去重 原版通知已到达 kind=${activity.kind} sessionFile=${activity.sessionFile || '无'}`);
+          return;
+        }
+      }
+
+      if (trigger === 'whenUnfocused' && await isHanaFocused()) {
+        dbg(`活动提醒拦截 Hana 在前台 kind=${activity.kind}`);
+        return;
+      }
+      if (isInQuietHours(cfg)) {
+        dbg(`活动提醒拦截 静默时段 kind=${activity.kind}`);
+        return;
+      }
+
+      const displayName = activity.agentName === activity.agentId
+        ? agentName(activity.agentId)
+        : activity.agentName;
+      const { title, body } = buildActivityNotification({ ...activity, agentName: displayName });
+
+      let avatar = APP_ICON;
+      try {
+        avatar = await resolveAgentAvatar(agentsHome, activity.agentId, {
+          resources: ctx.resources
+        }) || APP_ICON;
+      } catch (error) {
+        dbg('活动提醒伙伴头像读取失败：' + (error?.message || error));
+      }
+
+      const soundCfg = (cfg.agentSounds || {})[activity.agentId] || 'default';
+      let sound;
+      if (soundCfg === 'silent') sound = 'silent';
+      else if (soundCfg && soundCfg !== 'default') {
+        sound = resolveSound(dataDir, soundCfg, cfg.soundDir, { allowExternal: !!cfg.soundDir }) || undefined;
+        if (sound && cfg.soundDir) {
+          try {
+            const stat = await ctx.resources.stat({ kind: 'local-file', path: sound });
+            if (!stat?.exists || stat.isDirectory) sound = undefined;
+          } catch (error) {
+            dbg('活动提醒音效读取未获授权或文件不可用：' + (error?.message || error));
+            sound = undefined;
+          }
+        }
+      }
+
+      const via = await notify({
+        title,
+        body,
+        icon: avatar || undefined,
+        sound,
+        duration: cfg.toastDuration,
+        style: 'icon'
+      });
+      dbg(`活动提醒提交结果 kind=${activity.kind} status=${activity.status} agent=${activity.agentId} via=${via} title=${title}`);
+    } catch (error) {
+      dbg(`活动提醒异常：${error?.stack || error?.message || error}`);
+      log?.error?.('[提个醒] 活动提醒异常', { error: error?.message || error });
+    }
+  }
+
   function clearSessionTimer(sessionId) {
     const t = timers.get(sessionId);
     if (t) {
@@ -304,9 +398,15 @@ export async function apply(ctx) {
         const et = event?.type || '?';
         if (!isDebugNoisyEvent(et)) dbg(`事件 ${et}`);
 
-        // 宿主活动通知（计划任务完成这类）先记账，稍后按会话去重
+        // 宿主活动通知（计划任务 / 巡检完成这类）先记账，稍后按活动会话去重
         if (et === 'notification') {
           activityNotifications.mark(sessionPath || event?.sessionFile || event?.sessionPath);
+          return;
+        }
+
+        const activity = parseActivityUpdate(event);
+        if (activity) {
+          await handleActivityUpdate(activity);
           return;
         }
 
