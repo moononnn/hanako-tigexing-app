@@ -30,6 +30,7 @@ import {
 import { isHanaFocused } from './lib/window-focus.js';
 import { getStyle, sessionPrefix } from './lib/style.js';
 import { BackgroundTaskTracker } from './lib/background-tasks.js';
+import { DeferredTurns } from './lib/deferred-turns.js';
 import { resolveAgentAvatar } from './lib/agent-avatar.js';
 import { resolveSound } from './lib/sounds.js';
 import { normalizeSessionPath, parseSessionIdentity, resolveSessionTitleWithRetry } from './lib/session-title.js';
@@ -46,6 +47,10 @@ const ACTIVITY_NOTIFICATION_GRACE_MS = 1500;
 const INSTALL_DIR = path.dirname(fileURLToPath(import.meta.url));
 // 找不到伙伴头像时的兜底脸（notify.ps1 里也有一份同样的兜底）
 const APP_ICON = path.join(INSTALL_DIR, 'assets', 'icon.png');
+
+// 通知落地的依赖注入点。生产环境留空 = 直接 spawn PowerShell；
+// 端到端测试注入假 spawn，避免单测真的弹系统通知。
+export const toastDependencies = { dependencies: undefined };
 
 /**
  * HANA_HOME 在 App 里取不到环境变量。优先用宿主提供的 dataDir 回推，
@@ -94,6 +99,7 @@ export async function apply(ctx) {
   });
   dbg(`真实用户参与记录恢复 count=${participation.sessions.size}`);
   const backgroundTasks = new BackgroundTaskTracker();
+  const deferredTurns = new DeferredTurns();
   const activityNotifications = new ActivityNotificationTracker();
   const sessionIdsByPath = new Map();
   const sessionTitlesByPath = new Map();
@@ -130,7 +136,7 @@ export async function apply(ctx) {
   async function notify({ title, body, icon, sound, duration, style }) {
     const result = await deliverToast({
       pluginDir: INSTALL_DIR, title, message: body, style, icon, sound, duration, log
-    }, (input) => ctx.notifications.show(input));
+    }, (input) => ctx.notifications.show(input), toastDependencies.dependencies);
     return result.via;
   }
 
@@ -327,7 +333,7 @@ export async function apply(ctx) {
   }
 
   // ── 回合完成 ──
-  async function handleTurnEnd(info) {
+  async function handleTurnEnd(info, options = {}) {
     // 用户打断后重发（常见于改错字）不算完成回复
     if (info.aborted) {
       dbg('中断回合跳过普通提醒，reason=' + (info.reason || '未知'));
@@ -340,7 +346,7 @@ export async function apply(ctx) {
     }
 
     const now = Date.now();
-    const { agentId, sessionId, text } = info;
+    const { sessionId } = info;
 
     // 只提醒用户真实参与的会话：后台调度（漂流瓶、小生活日常）也会产生 turn_end，
     // 那些会话从没有过用户消息，弹了是打扰。
@@ -348,12 +354,24 @@ export async function apply(ctx) {
       dbg(`未确认真实用户参与，跳过提醒 session=${sessionId}`);
       return;
     }
-    // 对话框还有后台任务在跑：等它们收齐再提醒，避免中间过程弹窗
+    // 对话框还有后台任务在跑：先压住，等它们收齐再补发，避免中间过程弹窗。
+    // 兜底是超时释放（见 background-tasks.js），所以这里不会永久丢失。
+    const expired = backgroundTasks.prune(sessionId, now);
+    if (expired.length) {
+      dbg(`后台任务超时兜底释放 session=${sessionId} task=${expired.join(',')}`);
+    }
     if (backgroundTasks.has(sessionId)) {
-      dbg(`对话框仍有后台任务，暂不提醒 remaining=${backgroundTasks.count(sessionId)}`);
+      if (!options.deferred) deferredTurns.stash(sessionId, info, now);
+      dbg(`对话框仍有后台任务，暂不提醒 session=${sessionId} remaining=${backgroundTasks.count(sessionId)}`);
       return;
     }
 
+    await notifyTurnEnd(info, sessionId, now);
+  }
+
+  // ── 完成提醒本体（前置检查之外的全部逻辑） ──
+  async function notifyTurnEnd(info, sessionId, now) {
+    const { agentId, text } = info;
     const cfg = config.get();
     // 刷新配置但保留 Notifier 里的合并窗口状态，否则每轮都会把窗口清空
     notifier.config = cfg;
@@ -381,12 +399,13 @@ export async function apply(ctx) {
 
     if (decision.action === 'skip') return;                 // 静默时段
     if (decision.action === 'merge') {
-      scheduleFlush(sessionId, cfg.mergeWindowMs || 30000);
+      scheduleFlush(sessionId, cfg.mergeWindowMs ?? 30000);
       return;
     }
 
     await doToast(decision, cfg.toastStyle);
-    if (decision.kind === 'first') scheduleFlush(sessionId, cfg.mergeWindowMs || 30000);
+    // 用 ?? 而不是 ||：0 是合法配置（不合并），|| 会把它当成假值兜回 30 秒。
+    if (decision.kind === 'first') scheduleFlush(sessionId, cfg.mergeWindowMs ?? 30000);
   }
 
   // ── 订阅总线 ──
@@ -416,7 +435,17 @@ export async function apply(ctx) {
           backgroundTasks.update(bg);
           const done = bg.action === 'remove'
             || ['completed', 'failed', 'canceled', 'aborted'].includes(String(bg.status || '').toLowerCase());
-          dbg(`后台任务${done ? '结束' : '开始'} remaining=${backgroundTasks.count(bg.sessionId)}`);
+          dbg(`后台任务${done ? '结束' : '开始'} session=${bg.sessionId} task=${bg.taskId} remaining=${backgroundTasks.count(bg.sessionId)}`);
+          // 收齐了就补发被压下的那条完成提醒；补发再走一遍完整前置检查，不绕过任何规则。
+          if (done && !backgroundTasks.has(bg.sessionId) && deferredTurns.has(bg.sessionId)) {
+            const pending = deferredTurns.take(bg.sessionId);
+            if (pending) {
+              dbg(`后台任务收齐，补发被压下的完成提醒 session=${bg.sessionId}`);
+              await handleTurnEnd(pending, { deferred: true });
+            } else {
+              dbg(`后台任务收齐，但暂存的完成提醒已过期，丢弃 session=${bg.sessionId}`);
+            }
+          }
           return;
         }
 
@@ -432,6 +461,14 @@ export async function apply(ctx) {
           if (key) {
             sessionIdsByPath.delete(key);
             sessionTitlesByPath.delete(key);
+          }
+          // 会话没了，后台任务计数和暂存一起清掉，别留给下一个同名会话。
+          const closedSid = sessionIdFromPath(identity?.sessionPath || sessionPath);
+          if (closedSid) {
+            if (backgroundTasks.forget(closedSid)) {
+              dbg(`会话关闭，清空后台任务计数 session=${closedSid}`);
+            }
+            deferredTurns.forget(closedSid);
           }
           return;
         }

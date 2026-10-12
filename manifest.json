@@ -2,7 +2,7 @@
   "manifestVersion": 2,
   "id": "tigexing-app",
   "name": "提个醒",
-  "version": "0.0.19",
+  "version": "0.0.21",
   "entry": "index.js",
   "description": "伙伴回复、计划任务和巡检完成时按设置提醒，可按伙伴个性化音效，并设置提醒档位与静默时段。",
   "capabilities": [
