@@ -15,6 +15,7 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 
 import { apply, toastDependencies } from "../index.js";
+import { BackgroundTaskTracker } from "../lib/background-tasks.js";
 
 // 假 spawn：立即报启动失败，sendToast 返回 false 后退回宿主通道，
 // 既走完真实链路，又不会真的拉 PowerShell 弹系统通知。
@@ -111,6 +112,7 @@ async function withHarness(fn) {
     await fn({ send, notified: seen.notified });
   } finally {
     toastDependencies.dependencies = undefined;
+    toastDependencies.backgroundTasks = null;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }
@@ -168,7 +170,7 @@ test("没有暂存时不凭空补发", async () => {
   });
 });
 
-// 回归：合并窗口配 0 必须真的关掉合并。曾经入口写的是 `|| 30000`，0 被当假值兜回 30 秒，
+// 回归：合并窗口配 0 必须真的关掉合并。曾经入口写的是 `|| 30000`，0 被当假值兑回 30 秒，
 // 导致「0 = 不合并」这个配置根本不生效。
 test("合并窗口配 0 时不合并，两条回复各弹一张", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tigexing-merge0-"));
@@ -194,6 +196,80 @@ test("合并窗口配 0 时不合并，两条回复各弹一张", async () => {
     assert.equal(seen.notified.length, 2, "两条应各弹一张，不合并");
   } finally {
     toastDependencies.dependencies = undefined;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// 兵底路径（2026-10-12 交叉审查提出的真实场景）：后台任务的结束通知永久丢失，
+// 任务只在开始时上报过一次。超 TTL 后下一个回合必须能正常提醒，并在正文里说清实情。
+test("兜底：结束通知丢失后，下一个回合照常提醒且正文带实情说明", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tigexing-ttl-"));
+  fs.mkdirSync(path.join(dir, "tigexing-app"), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "tigexing-app", "preferences.json"),
+    JSON.stringify({ mergeWindowMs: 1 }),
+    "utf8"
+  );
+  const { ctx, seen } = makeCtx(dir);
+  const tracker = new BackgroundTaskTracker({ ttlMs: 30 });
+  toastDependencies.dependencies = { spawnProcess: blockedSpawn, timeoutMs: 200 };
+  toastDependencies.backgroundTasks = tracker;
+  try {
+    await apply(ctx);
+    const send = (event) => seen.subscribed.callback(event, SESSION_PATH);
+    send(userMessage());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // 只上报开始，永远不来 remove
+    send(backgroundTask("upsert", "leaky"));
+    send(turnEnd("先出一版，任务还在跑"));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(seen.notified.length, 0, "还有后台任务时不该弹");
+
+    // 超 TTL 后的下一个回合：兵底释放，应该弹出来
+    send(turnEnd("这是后来的消息"));
+    assert.equal(await waitFor(() => seen.notified.length > 0), true, "兵底释放后应正常提醒");
+    assert.equal(seen.notified.length, 1, "只弹这一条");
+    assert.match(String(seen.notified[0].body || ""), /后台任务还在跑/, "正文应说明这版可能还会变");
+  } finally {
+    toastDependencies.dependencies = undefined;
+    toastDependencies.backgroundTasks = null;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// 兵底释放时，当前回合自己就要弹，补发旧回合会变成重复；旧的那条必须被清掉而不是堆着。
+test("兜底：释放时不补发旧回合，避免重复弹", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tigexing-ttl2-"));
+  fs.mkdirSync(path.join(dir, "tigexing-app"), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "tigexing-app", "preferences.json"),
+    JSON.stringify({ mergeWindowMs: 1 }),
+    "utf8"
+  );
+  const { ctx, seen } = makeCtx(dir);
+  toastDependencies.dependencies = { spawnProcess: blockedSpawn, timeoutMs: 200 };
+  toastDependencies.backgroundTasks = new BackgroundTaskTracker({ ttlMs: 30 });
+  try {
+    await apply(ctx);
+    const send = (event) => seen.subscribed.callback(event, SESSION_PATH);
+    send(userMessage());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    send(backgroundTask("upsert", "leaky"));
+    send(turnEnd("被压住的第一条"));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    send(turnEnd("后来的第二条"));
+    assert.equal(await waitFor(() => seen.notified.length > 0), true);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    assert.equal(seen.notified.length, 1, "不能既弹当前回合又补发旧回合");
+    const text = `${seen.notified[0].title || ""} ${seen.notified[0].body || ""}`;
+    assert.match(text, /后来的第二条/);
+    assert.doesNotMatch(text, /被压住的第一条/);
+  } finally {
+    toastDependencies.dependencies = undefined;
+    toastDependencies.backgroundTasks = null;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });

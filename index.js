@@ -50,7 +50,11 @@ const APP_ICON = path.join(INSTALL_DIR, 'assets', 'icon.png');
 
 // 通知落地的依赖注入点。生产环境留空 = 直接 spawn PowerShell；
 // 端到端测试注入假 spawn，避免单测真的弹系统通知。
-export const toastDependencies = { dependencies: undefined };
+export const toastDependencies = {
+  dependencies: undefined,
+  // 注入一个自定义 tracker（自定义 TTL）用于测兜底路径；为空即默认 10 分钟。
+  backgroundTasks: null,
+};
 
 /**
  * HANA_HOME 在 App 里取不到环境变量。优先用宿主提供的 dataDir 回推，
@@ -98,7 +102,7 @@ export async function apply(ctx) {
     onError: (error) => dbg('参与记录保存/恢复失败：' + (error?.message || error))
   });
   dbg(`真实用户参与记录恢复 count=${participation.sessions.size}`);
-  const backgroundTasks = new BackgroundTaskTracker();
+  const backgroundTasks = toastDependencies.backgroundTasks || new BackgroundTaskTracker();
   const deferredTurns = new DeferredTurns();
   const activityNotifications = new ActivityNotificationTracker();
   const sessionIdsByPath = new Map();
@@ -155,6 +159,7 @@ export async function apply(ctx) {
       agentName: decision.agentName,
       snippet: decision.snippet,
       refineText: decision.refineText,
+      notice: decision.notice,
       count: decision.count
     });
     const sessionKey = normalizeSessionPath(decision.sessionPath);
@@ -355,10 +360,17 @@ export async function apply(ctx) {
       return;
     }
     // 对话框还有后台任务在跑：先压住，等它们收齐再补发，避免中间过程弹窗。
-    // 兜底是超时释放（见 background-tasks.js），所以这里不会永久丢失。
+    // 兜底挂在 turn_end 上是足够的：唯一需要放行的时刻就是完成回合到来时，没有回合就没有提醒需求。
     const expired = backgroundTasks.prune(sessionId, now);
+    let releasedByTimeout = false;
     if (expired.length) {
+      releasedByTimeout = true;
       dbg(`后台任务超时兜底释放 session=${sessionId} task=${expired.join(',')}`);
+      // 本回合自己就要弹，补发被压住的那条会变成重复；清掉就行，别让它堆在内存里。
+      if (deferredTurns.has(sessionId)) {
+        deferredTurns.take(sessionId, now);
+        dbg(`超时释放后不再补发同会话旧回合（当前回合已弹）session=${sessionId}`);
+      }
     }
     if (backgroundTasks.has(sessionId)) {
       if (!options.deferred) deferredTurns.stash(sessionId, info, now);
@@ -366,11 +378,11 @@ export async function apply(ctx) {
       return;
     }
 
-    await notifyTurnEnd(info, sessionId, now);
+    await notifyTurnEnd(info, sessionId, now, releasedByTimeout);
   }
 
   // ── 完成提醒本体（前置检查之外的全部逻辑） ──
-  async function notifyTurnEnd(info, sessionId, now) {
+  async function notifyTurnEnd(info, sessionId, now, releasedByTimeout = false) {
     const { agentId, text } = info;
     const cfg = config.get();
     // 刷新配置但保留 Notifier 里的合并窗口状态，否则每轮都会把窗口清空
@@ -393,7 +405,15 @@ export async function apply(ctx) {
     }
 
     const decision = notifier.decide(
-      { sessionId, agentId, agentName: agentName(agentId), text, sessionPath: info.sessionPath },
+      {
+        sessionId,
+        agentId,
+        agentName: agentName(agentId),
+        text,
+        sessionPath: info.sessionPath,
+        // 兵底放行的回合不一定是最终结果（后台任务可能还在跑），正文前加一句实情。
+        notice: releasedByTimeout ? '（后台任务还在跑，这版可能还会变）' : ''
+      },
       now
     );
 
