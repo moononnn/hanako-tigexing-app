@@ -6,7 +6,7 @@
 // 弹窗走两条腿：先自己拉 PowerShell（保住伙伴头像、专属音效、自定义来源名），
 // 脚本未确认提交时退回宿主通知；提交成功仍不保证 Windows 显示横幅。
 //
-// 还没搬的：异常回合提醒、子伙伴提醒门的细粒度。
+// 还没搬的：子伙伴提醒门的细粒度。
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,12 +16,19 @@ import { createConfigManager } from './lib/config.js';
 import { deliverToast } from './lib/toast.js';
 import {
   parseTurnEnd,
+  parseTurnFailure,
+  parseProviderError,
+  parseSessionAbort,
+  parseAutoRetryStart,
+  parseAutoRetryEnd,
   parseActivityUpdate,
   parseSessionBackgroundTask,
   sessionIdFromPath,
   shouldNotifyCompletedTurn,
   isUserInitiatedAbortReason
 } from './lib/event-parse.js';
+import { AbnormalTurnTracker } from './lib/abnormal-state.js';
+import { buildAbnormalCopy, isRetryCancelled } from './lib/abnormal-copy.js';
 import {
   ActivityNotificationTracker,
   buildActivityNotification,
@@ -145,13 +152,13 @@ export async function apply(ctx) {
   }
 
   // ── 组装并弹一条 ──
-  async function doToast(decision, toastStyle) {
+  async function doToast(decision, toastStyle, copyOverride) {
     const cfg = config.get();
     const styleId = (cfg.agentStyles || {})[decision.agentId] || 'default';
     const style = getStyle(styleId);
 
     // 跟旧版一致：先生成通知正文，再读取会话标题，给宿主异步起名留时间。
-    const copy = await buildNotificationCopy({
+    const copy = copyOverride || await buildNotificationCopy({
       enabled: cfg.refineEnabled,
       modelConfig: refineModelConfig,
       style,
@@ -184,9 +191,9 @@ export async function apply(ctx) {
       style: styleId, refined: copy.refined, sessionTitle: sessionTitle || null,
       inputChars: (decision.refineText || decision.snippet || '').length,
       snippet: decision.snippet, body,
-      source: refineConfig.modelSource || 'agent',
-      provider: refineConfig.hanaModel?.providerId,
-      model: refineConfig.hanaModel?.modelId
+      source: copy.refined ? (refineConfig.modelSource || 'agent') : 'rule',
+      provider: copy.refined ? refineConfig.hanaModel?.providerId : undefined,
+      model: copy.refined ? refineConfig.hanaModel?.modelId : undefined
     }));
 
     // ResourceIO 只列出获准的头像文件名；Toast 子进程读取返回路径，失败时退应用图标。
@@ -225,6 +232,53 @@ export async function apply(ctx) {
     });
     dbg(`通知提交结果 session=${decision.sessionId} kind=${decision.kind} via=${via} title=${title}`);
   }
+
+  async function handleAbnormalAlert(alert) {
+    const sessionId = String(alert?.sessionId || '').trim();
+    if (!sessionId || !participation.has(sessionId)) {
+      dbg(`异常提醒跳过：未确认真实用户参与 session=${sessionId || 'unknown'}`);
+      return;
+    }
+
+    const cfg = config.get();
+    if (!cfg.enabled || !cfg.abnormalEnabled) {
+      dbg(`异常提醒跳过 enabled=${cfg.enabled} abnormalEnabled=${cfg.abnormalEnabled}`);
+      return;
+    }
+    if (isInQuietHours(cfg)) {
+      dbg(`异常提醒跳过：静默时段 session=${sessionId}`);
+      return;
+    }
+
+    const reason = [alert.errorMessage, alert.finalError, alert.reason]
+      .map((value) => String(value || '').trim())
+      .find((value) => value && !/^(?:unknown error|\[object object\])$/i.test(value)) || '';
+    const name = agentName(alert.agentId);
+    const copy = buildAbnormalCopy({
+      agentName: name,
+      partialText: alert.text,
+      errorMessage: reason
+    });
+    dbg(`异常提醒候选 session=${sessionId} source=${alert.source || 'unknown'} reason=${copy.body}`);
+    await doToast({
+      sessionId,
+      agentId: alert.agentId || 'unknown',
+      agentName: name,
+      sessionPath: alert.sessionPath || '',
+      snippet: alert.text || '',
+      refineText: alert.text || '',
+      kind: 'failure'
+    }, cfg.toastStyle, copy);
+  }
+
+  const abnormalTurns = new AbnormalTurnTracker({
+    onAlert: (alert) => {
+      void handleAbnormalAlert(alert).catch((error) => {
+        dbg(`异常提醒处理失败：${error?.stack || error?.message || error}`);
+        log?.error?.('[提个醒] 异常提醒处理失败', { error: error?.message || error });
+      });
+    }
+  });
 
   async function handleActivityUpdate(activity) {
     try {
@@ -486,6 +540,7 @@ export async function apply(ctx) {
           // 会话没了，后台任务计数和暂存一起清掉，别留给下一个同名会话。
           const closedSid = sessionIdFromPath(identity?.sessionPath || sessionPath);
           if (closedSid) {
+            abnormalTurns.forget(closedSid);
             if (backgroundTasks.forget(closedSid)) {
               dbg(`会话关闭，清空后台任务计数 session=${closedSid}`);
             }
@@ -509,13 +564,58 @@ export async function apply(ctx) {
         // 用户消息：记下会话活跃时间，用于「当前窗口」判定
         if (et === 'session_user_message') {
           const sid = sessionIdFromPath(sessionPath);
-          if (sid) participation.mark(sid);
+          if (sid) {
+            participation.mark(sid);
+            abnormalTurns.beginUserTurn(sid);
+          }
+          return;
+        }
+
+        const retryStart = parseAutoRetryStart(event, sessionPath);
+        if (retryStart) {
+          abnormalTurns.onRetryStart(retryStart.sessionId);
+          return;
+        }
+        const retryEnd = parseAutoRetryEnd(event, sessionPath);
+        if (retryEnd) {
+          abnormalTurns.onRetryEnd(retryEnd);
+          return;
+        }
+        const providerFailure = parseProviderError(event, sessionPath);
+        if (providerFailure) {
+          if (isRetryCancelled(providerFailure.errorMessage)) {
+            abnormalTurns.onTurnSuccess(providerFailure.sessionId);
+          } else {
+            abnormalTurns.onTurnFailure(providerFailure);
+          }
+          return;
+        }
+        const sessionAbort = parseSessionAbort(event, sessionPath);
+        if (sessionAbort) {
+          if (isRetryCancelled(sessionAbort.errorMessage)) {
+            abnormalTurns.onTurnSuccess(sessionAbort.sessionId);
+          } else {
+            abnormalTurns.onTurnFailure(sessionAbort);
+          }
           return;
         }
 
         const info = parseTurnEnd(event, sessionPath);
         if (!info) return;
-        if (info.aborted && isUserInitiatedAbortReason(info.reason)) return;
+        if (info.aborted && isUserInitiatedAbortReason(info.reason)) {
+          abnormalTurns.onTurnSuccess(info.sessionId);
+          return;
+        }
+        const failure = parseTurnFailure(event, sessionPath);
+        if (failure) {
+          if (isRetryCancelled(failure.errorMessage)) {
+            abnormalTurns.onTurnSuccess(failure.sessionId);
+          } else {
+            abnormalTurns.onTurnFailure(failure);
+          }
+          return;
+        }
+        if (shouldNotifyCompletedTurn(info)) abnormalTurns.onTurnSuccess(info.sessionId);
         await handleTurnEnd(info);
       } catch (error) {
         dbg('事件处理异常：' + (error?.stack || error?.message || error));

@@ -257,11 +257,28 @@ test("异常事件：正常 stop 和工具中间轮不进入失败解析", () =>
   assert.equal(parseTurnFailure({ type: "turn_end", message: { stopReason: "toolUse", content: [] } }, sessionPath), null);
 });
 
+test("异常事件：兼容 event 顶层 stopReason", () => {
+  const failure = parseTurnFailure({
+    type: "turn_end",
+    stopReason: "error",
+    errorMessage: "Token Plan usage limit",
+    message: { content: [] }
+  }, sessionPath);
+  assert.equal(failure.stopReason, "error");
+  assert.equal(failure.errorMessage, "Token Plan usage limit");
+});
+
 test("异常事件：非主动超时释放进入失败解析，主动停止过滤", () => {
   const timeout = parseTurnFailure({ type: "turn_end", aborted: true, reason: "turn_stall_timeout" }, sessionPath);
   assert.equal(timeout.reason, "turn_stall_timeout");
   assert.equal(timeout.errorMessage, "turn_stall_timeout");
   assert.equal(parseTurnFailure({ type: "turn_end", aborted: true, reason: "abort" }, sessionPath), null);
+  assert.equal(parseTurnFailure({
+    type: "turn_end",
+    aborted: true,
+    reason: "user_abort",
+    message: { stopReason: "error", errorMessage: "request aborted" }
+  }, sessionPath), null);
   assert.equal(isUserInitiatedAbortReason("close_all"), true);
 });
 
@@ -269,9 +286,16 @@ test("异常事件：error 和 session_status 释放可作为兜底", () => {
   const provider = parseProviderError({ type: "error", message: "fetch failed" }, sessionPath);
   assert.equal(provider.sessionId, "turn-1");
   assert.equal(provider.errorMessage, "fetch failed");
+  const structured = parseProviderError({
+    type: "error",
+    message: { http_code: 402, error: { message: "Token Plan usage limit" } }
+  }, sessionPath);
+  assert.equal(structured.errorMessage, "402: Token Plan usage limit");
   const abort = parseSessionAbort({ type: "session_status", isStreaming: false, aborted: true, reason: "turn_stall_timeout" }, sessionPath);
   assert.equal(abort.reason, "turn_stall_timeout");
+  assert.equal(parseSessionAbort({ type: "session_status", isStreaming: false }, sessionPath), null);
   assert.equal(parseSessionAbort({ type: "session_status", isStreaming: false, aborted: true, reason: "abort_all" }, sessionPath), null);
+  assert.equal(parseSessionAbort({ type: "session_status", isStreaming: false, aborted: true, reason: "user_cancelled" }, sessionPath), null);
 });
 
 test("异常事件：自动重试开始/结束解析", () => {

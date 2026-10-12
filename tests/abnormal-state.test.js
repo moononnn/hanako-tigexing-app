@@ -43,6 +43,27 @@ test("自动重试耗尽：只提醒一次，并保留失败回合内容", () =>
   assert.equal(alerts[0].text, "已经收到一半");
 });
 
+test("较晚到达的 provider error 不覆盖已收到的部分正文或具体原因", () => {
+  const { tracker, alerts } = fixture();
+  tracker.beginUserTurn("s1");
+  tracker.onTurnFailure(failure({ text: "已经收到的片段", errorMessage: "402 Token Plan 用量上限" }));
+  tracker.onTurnFailure(failure({ text: "", errorMessage: "Unknown error" }));
+  assert.equal(tracker.flush("s1"), true);
+  assert.equal(alerts[0].text, "已经收到的片段");
+  assert.equal(alerts[0].errorMessage, "402 Token Plan 用量上限");
+});
+
+test("forget 会清理失败计时和会话状态", () => {
+  const { tracker, pending, alerts } = fixture();
+  tracker.beginUserTurn("s1");
+  tracker.onTurnFailure(failure());
+  assert.equal(pending.size, 1);
+  assert.equal(tracker.forget("s1"), true);
+  assert.equal(pending.size, 0);
+  assert.equal(tracker.flush("s1"), false);
+  assert.equal(alerts.length, 0);
+});
+
 test("自动重试成功：清掉失败候选，不误报", () => {
   const { tracker, pending, alerts } = fixture();
   tracker.beginUserTurn("s1");

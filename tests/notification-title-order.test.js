@@ -8,8 +8,8 @@ import { buildNotificationCopy } from '../lib/notification-copy.js';
 const entry = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
 
 test('实际入口先完成正文生成，再读取真实会话标题', () => {
-  const copyAt = entry.indexOf('const copy = await buildNotificationCopy(');
-  const lookupAt = entry.indexOf('await resolveSessionTitleWithRetry(', copyAt);
+  const copyAt = entry.indexOf('await buildNotificationCopy({');
+  const lookupAt = entry.indexOf('await resolveSessionTitleWithRetry({', copyAt);
   assert.ok(copyAt >= 0 && lookupAt > copyAt);
   assert.doesNotMatch(entry.slice(copyAt, lookupAt), /count: decision\.count,\s*sessionTitle/);
   assert.match(entry, /sessionTitle = sessionTitlesByPath\.get\(sessionKey\) \|\| sessionTitle/);

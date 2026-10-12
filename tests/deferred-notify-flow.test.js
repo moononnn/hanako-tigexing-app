@@ -91,14 +91,14 @@ const turnEnd = (text) => ({
   message: { stopReason: "stop", content: [{ type: "text", text }] }
 });
 
-async function withHarness(fn) {
+async function withHarness(fn, preferences = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tigexing-e2e-"));
   // 合并窗口：默认 30 秒防轰炸；配成 0 = 完全不合并，每条最终回复各弹一张。
   // （入口处必须用 `?? 30000`，用 `||` 会把 0 当假值兜回 30 秒。）
   fs.mkdirSync(path.join(dir, "tigexing-app"), { recursive: true });
   fs.writeFileSync(
     path.join(dir, "tigexing-app", "preferences.json"),
-    JSON.stringify({ mergeWindowMs: 1 }),
+    JSON.stringify({ mergeWindowMs: 1, ...preferences }),
     "utf8"
   );
   const { ctx, seen } = makeCtx(dir);
@@ -287,4 +287,60 @@ test("兜底：释放时不补发旧回合，避免重复弹", async () => {
     toastDependencies.backgroundTasks = null;
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("模型额度错误会触发异常提醒，并保留停止原因和已收到的内容", async () => {
+  await withHarness(async ({ send, notified }) => {
+    const errorMessage = '402: {"type":"insufficient_balance_error","message":"当前已达到 Token Plan 用量上限。为避免调用中断，请升级 Token Plan 套餐，或购买积分补充用量并开启积分自动消耗。 (2067)","http_code":"402"}';
+    send({ type: "error", message: errorMessage, sessionPath: SESSION_PATH });
+    send({
+      type: "turn_end",
+      agentId: "hanako",
+      message: {
+        stopReason: "error",
+        errorMessage,
+        content: [{ type: "text", text: "已经写到一半" }]
+      }
+    });
+
+    const delivered = await waitFor(() => notified.length > 0, 6000);
+    assert.equal(delivered, true, "模型异常中断应该有通知");
+    assert.equal(notified.length, 1, "同一次失败只弹一条");
+    assert.match(String(notified[0].title || ""), /端到端测试/);
+    assert.match(String(notified[0].body || ""), /Token Plan/);
+    assert.match(String(notified[0].body || ""), /402\/2067/);
+    assert.match(String(notified[0].body || ""), /额度恢复后/);
+    assert.match(String(notified[0].body || ""), /已经写到一半/);
+  });
+});
+
+test("自动重试耗尽时，异常提醒会及时弹出", async () => {
+  await withHarness(async ({ send, notified }) => {
+    send({
+      type: "turn_end",
+      agentId: "hanako",
+      message: {
+        stopReason: "error",
+        errorMessage: "429 rate limit",
+        content: [{ type: "text", text: "有限内容" }]
+      }
+    });
+    send({ type: "error", message: "429 rate limit", sessionPath: SESSION_PATH });
+    send({ type: "auto_retry_start", attempt: 1, maxAttempts: 1, errorMessage: "429 rate limit" });
+    send({ type: "auto_retry_end", success: false, attempt: 1, finalError: "429 rate limit" });
+
+    assert.equal(await waitFor(() => notified.length > 0, 1000), true, "重试耗尽后不应再等宽限期");
+    assert.equal(notified.length, 1);
+    assert.match(String(notified[0].body || ""), /限流/);
+    assert.match(String(notified[0].body || ""), /有限内容/);
+  });
+});
+
+test("断联提醒开关关闭时不弹模型错误通知", async () => {
+  await withHarness(async ({ send, notified }) => {
+    send({ type: "error", message: "quota exceeded", sessionPath: SESSION_PATH });
+    send({ type: "auto_retry_end", success: false, attempt: 1, finalError: "quota exceeded" });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.equal(notified.length, 0);
+  }, { abnormalEnabled: false });
 });

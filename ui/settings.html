@@ -552,7 +552,7 @@
   
   <div class="card" style="border-color:var(--warn);background:var(--warn-soft)">
     <h2>小提示</h2>
-    <div class="hint">提个醒现在接管 <b>聊天回复、计划任务和巡检完成</b>三类提醒。为避免聊天回复双弹，可以把 Hana 设置里「聊天回复完成」那条原版通知设为「从不」。计划任务和巡检都会留一点时间识别 Hana 原版通知；检测到同一活动已有原版通知时，提个醒就跳过补弹。</div>
+    <div class="hint">提个醒现在接管 <b>聊天回复、模型异常中断、计划任务和巡检完成</b>四类提醒。为避免聊天回复双弹，可以把 Hana 设置里「聊天回复完成」那条原版通知设为「从不」。计划任务和巡检都会留一点时间识别 Hana 原版通知；检测到同一活动已有原版通知时，提个醒就跳过补弹。</div>
   </div>
   
 
@@ -574,7 +574,7 @@
       <div class="btn-row" style="justify-content:space-between;margin-bottom:10px">
         <div>
           <div style="font-size:14px">回复异常中断时提醒</div>
-          <div class="hint">伙伴回复中途断掉（超时/报错/被意外终止）时弹一条通知。<b>这一版还没接上这个提醒，开关目前不生效</b>，先保持默认就好。</div>
+          <div class="hint">模型回复异常中断时弹一条通知；错误信息带原因的话，会尽量说明额度用尽、限流、连接问题等，并保留已收到的片段。提个醒只负责通知，不会替你发“继续”或续接。</div>
         </div>
         <button type="button" class="switch on" id="sw-abnormal" role="switch" aria-checked="true" aria-label="断联提醒"></button>
       </div>
