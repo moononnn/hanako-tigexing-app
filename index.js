@@ -411,8 +411,9 @@ export async function apply(ctx) {
         agentName: agentName(agentId),
         text,
         sessionPath: info.sessionPath,
-        // 兵底放行的回合不一定是最终结果（后台任务可能还在跑），正文前加一句实情。
-        notice: releasedByTimeout ? '（后台任务还在跑，这版可能还会变）' : ''
+        // 兵底放行的回合不一定是最终结果（后台任务可能还在跑，也可能没收到它的完成通知），
+        // 正文前加一句短提示。刻意写短：横幅只有两行，后面还得留位置给伙伴原话。
+        notice: releasedByTimeout ? '（这版可能还会变）' : ''
       },
       now
     );

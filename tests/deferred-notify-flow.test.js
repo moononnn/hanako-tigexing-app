@@ -200,6 +200,19 @@ test("合并窗口配 0 时不合并，两条回复各弹一张", async () => {
   }
 });
 
+test("补发：正常收齐后补发的通知不带兜底提示", async () => {
+  await withHarness(async ({ send, notified }) => {
+    send(backgroundTask("upsert", "child-a"));
+    send(turnEnd("子伙伴还在跑"));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    send(backgroundTask("remove", "child-a"));
+
+    assert.equal(await waitFor(() => notified.length > 0), true, "收齐后应补发");
+    const text = `${notified[0].title || ""} ${notified[0].body || ""}`;
+    assert.doesNotMatch(text, /这版可能还会变/, "正常收齐的补发不是兵底放行，不该带这句提示");
+  });
+});
+
 // 兵底路径（2026-10-12 交叉审查提出的真实场景）：后台任务的结束通知永久丢失，
 // 任务只在开始时上报过一次。超 TTL 后下一个回合必须能正常提醒，并在正文里说清实情。
 test("兜底：结束通知丢失后，下一个回合照常提醒且正文带实情说明", async () => {
@@ -230,7 +243,9 @@ test("兜底：结束通知丢失后，下一个回合照常提醒且正文带�
     send(turnEnd("这是后来的消息"));
     assert.equal(await waitFor(() => seen.notified.length > 0), true, "兵底释放后应正常提醒");
     assert.equal(seen.notified.length, 1, "只弹这一条");
-    assert.match(String(seen.notified[0].body || ""), /后台任务还在跑/, "正文应说明这版可能还会变");
+    assert.match(String(seen.notified[0].body || ""), /这版可能还会变/, "正文应说明这版可能还会变");
+    const text = `${seen.notified[0].title || ""} ${seen.notified[0].body || ""}`;
+    assert.doesNotMatch(seen.notified[0].title || "", /这版可能还会变/, "提示只进正文，不进标题");
   } finally {
     toastDependencies.dependencies = undefined;
     toastDependencies.backgroundTasks = null;

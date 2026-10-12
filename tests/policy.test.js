@@ -186,6 +186,46 @@ test("合并：窗口内只有 1 条时 flush 不补弹", () => {
   assert.equal(f, null);
 });
 
+test("notice：随决策透传，flush 后清空，不污染下一条", () => {
+  const n = new Notifier(baseConfig({ mergeWindowMs: 30000 }));
+  const t0 = 1_000_000;
+
+  // 兵底放行的那条带 notice
+  const d1 = n.decide({ sessionId: "s1", agentId: "agent_h", agentName: "小花", text: "可能还会变", notice: "（这版可能还会变）" }, t0);
+  assert.equal(d1.notice, "（这版可能还会变）", "notice 必须跟着决策走，否则正文拿不到");
+  assert.equal(d1.kind, "first");
+
+  // 窗口内没有新事件：flush 返回 null，状态也要清干净
+  assert.equal(n.flush("s1", t0 + 40000), null);
+
+  // 下一条不带 notice，不能带上上一条的脏值
+  const d2 = n.decide({ sessionId: "s1", agentId: "agent_h", agentName: "小花", text: "新一条" }, t0 + 50000);
+  assert.equal(d2.notice, "", "flush 之后 notice 必须已清空");
+});
+
+test("notice：合并补弹时也能透传，flush 后清零", () => {
+  const n = new Notifier(baseConfig({ mergeWindowMs: 30000 }));
+  const t0 = 1_000_000;
+  n.decide({ sessionId: "s1", agentId: "agent_h", agentName: "小花", text: "第一条", notice: "（这版可能还会变）" }, t0);
+  n.decide({ sessionId: "s1", agentId: "agent_h", agentName: "小花", text: "第二条", notice: "（这版可能还会变）" }, t0 + 5000);
+  const f = n.flush("s1", t0 + 40000);
+  assert.ok(f, "两条应补弹");
+  assert.equal(f.kind, "append");
+  assert.equal(f.notice, "（这版可能还会变）", "补弹也要带 notice");
+  assert.equal(f.snippet, "第二条");
+  assert.equal(n._state("s1").notice, "", "flush 后必须清零，否则下一次空转会带出旧 notice");
+});
+
+test("notice：只影响正文，不进标题也不改合并计数", () => {
+  const n = new Notifier(baseConfig({ mergeWindowMs: 30000 }));
+  const d = n.decide({ sessionId: "s1", agentId: "agent_h", agentName: "小花", text: "内容", notice: "（这版可能还会变）" }, 1_000_000);
+  assert.equal(d.kind, "first");
+  assert.equal(d.count, 1, "notice 不能当成一条通知影响计数");
+  // 标题走 buildTitle，签名里根本没有 notice
+  assert.equal(buildTitle("first", "小花", d.count), "小花 回你了");
+  assert.doesNotMatch(buildTitle("first", "小花", d.count), /可能还会变/);
+});
+
 test("合并：跨窗口永不合并，各弹各的", () => {
   const n = new Notifier(baseConfig({ mergeWindowMs: 30000 }));
   const t0 = 1_000_000;
