@@ -403,6 +403,12 @@ export async function apply(ctx) {
       dbg(`非最终回合跳过 stopReason=${info.stopReason}`);
       return;
     }
+    // 宿主偶尔会发出 stop 但没有任何可见正文的 turn_end；makeSnippet 会把空串补成「空回复」，
+    // 这会把内部空回合误报成伙伴已经正常回复。没有用户可见正文就静默，不影响异常提醒状态清理。
+    if (typeof info.text !== 'string' || !info.text.trim()) {
+      dbg(`空内容的结束回合不发普通提醒 session=${info.sessionId}`);
+      return;
+    }
 
     const now = Date.now();
     const { sessionId } = info;

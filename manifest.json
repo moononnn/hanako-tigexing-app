@@ -2,9 +2,9 @@
   "manifestVersion": 2,
   "id": "tigexing-app",
   "name": "提个醒",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "entry": "index.js",
-  "description": "伙伴回复、模型异常中断、计划任务和巡检完成时按设置提醒，可按伙伴个性化音效，并设置提醒档位与静默时段。",
+  "description": "不用守着聊天窗口等回复：给伙伴自定义专属音效和通知风格，让你一听一看就知道哪位伙伴回了；通知标明会话，多个窗口同时聊，也知道该回哪一边。模型异常中断时，也会提醒你。",
   "capabilities": [
     "app/notifications.show",
     "app/process.spawn",

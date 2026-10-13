@@ -128,6 +128,19 @@ test("对照：没有后台任务时，完成回合照常提醒", async () => {
   });
 });
 
+test("空内容的完成事件不冒充正常回复提醒，后续有正文时仍正常提醒", async () => {
+  await withHarness(async ({ send, notified }) => {
+    send(turnEnd(""));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(notified.length, 0, "空内容回合没有可提醒的回复正文");
+
+    send(turnEnd("这是实际回复"));
+    assert.equal(await waitFor(() => notified.length > 0), true, "后续真实正文仍应正常提醒");
+    assert.equal(notified.length, 1);
+    assert.match(String(notified[0].body || ""), /这是实际回复/);
+  });
+});
+
 test("后台任务在跑时不弹；收齐后补发被压下的那一条", async () => {
   await withHarness(async ({ send, notified }) => {
     send(backgroundTask("upsert", "child-a"));
