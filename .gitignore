@@ -15,6 +15,7 @@ preferences.json
 
 # 迁移与验证壳
 index.probe.js
+ui/probe.html
 probe-result.json
 
 # 临时与备份
