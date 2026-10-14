@@ -12,14 +12,20 @@ import path from "node:path";
 
 import { apply, name } from "../index.js";
 
+const manifest = JSON.parse(fs.readFileSync(new URL("../manifest.json", import.meta.url), "utf8"));
+
 function makeCtx(dataDir) {
-  const seen = { subscribed: null, requests: [], notified: [] };
+  const seen = { subscribed: null, requests: [], notified: [], services: [] };
   const ctx = {
     dataDir,
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     bus: {
       subscribe(callback, filter) {
         seen.subscribed = { callback, filter };
+        return () => {};
+      },
+      handle(service, handler, options) {
+        seen.services.push({ service, handler, options });
         return () => {};
       },
       async request(verb, payload) {
@@ -44,6 +50,20 @@ test("apply 能在 mock 宿主下跑完，并且挂上了总线订阅", async ()
   try {
     await apply(ctx);
     assert.ok(seen.subscribed, "应该订阅了总线");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("提个醒注册仅给拾光记使用的专注通知服务", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tigexing-app-"));
+  const { ctx, seen } = makeCtx(dir);
+  try {
+    await apply(ctx);
+    assert.equal(seen.services.length, 1);
+    assert.equal(seen.services[0].service, "focus/notify");
+    assert.equal(seen.services[0].options.allowCrossApp, true);
+    assert.ok(manifest.capabilities.includes("app/services.provide"));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

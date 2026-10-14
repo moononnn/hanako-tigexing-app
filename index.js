@@ -38,11 +38,13 @@ import { isHanaFocused } from './lib/window-focus.js';
 import { getStyle, sessionPrefix } from './lib/style.js';
 import { BackgroundTaskTracker } from './lib/background-tasks.js';
 import { DeferredTurns } from './lib/deferred-turns.js';
+import { WaitDebtTracker, parseWaitDebt } from './lib/wait-debt.js';
 import { resolveAgentAvatar } from './lib/agent-avatar.js';
-import { resolveSound } from './lib/sounds.js';
+import { listSounds, resolveSound } from './lib/sounds.js';
 import { normalizeSessionPath, parseSessionIdentity, resolveSessionTitleWithRetry } from './lib/session-title.js';
 import { createRefineModelConfig } from './lib/refine-model.js';
 import { buildNotificationCopy } from './lib/notification-copy.js';
+import { createFocusNotificationHandler, FOCUS_NOTIFY_SERVICE } from './lib/focus-notify.js';
 import { appendDebugLog, isDebugNoisyEvent } from './lib/debug-log.js';
 import { SessionParticipation } from './lib/session-participation.js';
 
@@ -50,6 +52,10 @@ export const name = 'tigexing-app';
 
 const APP_ID = 'tigexing-app';
 const ACTIVITY_NOTIFICATION_GRACE_MS = 1500;
+// 后台任务收齐后不立即补发，先静置这么久：收齐几乎总是「要接着干」的前一秒
+// （实测：收齐到新回合开工只隔 95 毫秒），立刻弹就是提前报完成。
+// 这段时间里窗口又开工，就说明那不是收尾，补发作废——伙伴接下来自己会产出真结论。
+const DEFERRED_FLUSH_GRACE_MS = 5000;
 // 安装目录从模块自身位置推：入口就在应用根，lib/notify.ps1 在它下面。
 const INSTALL_DIR = path.dirname(fileURLToPath(import.meta.url));
 // 找不到伙伴头像时的兜底脸（notify.ps1 里也有一份同样的兜底）
@@ -61,6 +67,10 @@ export const toastDependencies = {
   dependencies: undefined,
   // 注入一个自定义 tracker（自定义 TTL）用于测兜底路径；为空即默认 10 分钟。
   backgroundTasks: null,
+  // 同上：注入自定义「叫醒欠账」tracker（自定义 TTL）用于测它的兵底路径。
+  waitDebt: null,
+  // 补发静默期（毫秒）。null/未设=默认；测试可注入短值。
+  deferredFlushGraceMs: null,
 };
 
 /**
@@ -90,14 +100,22 @@ export async function apply(ctx) {
   // ── 伙伴显示名 ──
   // 应用读不到 Hana 的目录，走总线请求；漏 scope 会静默返空，必须带。
   let agentNames = {};
+  let agentRoster = [];
+  async function readAgentRoster() {
+    const res = await ctx.bus.request('agent:list', { scope: 'all' }, { timeout: 5000 });
+    const rows = Array.isArray(res?.agents) ? res.agents.filter((row) => row && typeof row.id === 'string' && row.id.trim()) : [];
+    agentRoster = rows;
+    const map = {};
+    for (const row of rows) map[row.id] = row.name || row.id;
+    if (Object.keys(map).length) agentNames = map;
+    return rows;
+  }
   async function refreshAgents() {
     try {
-      const res = await ctx.bus.request('agent:list', { scope: 'all' });
-      const map = {};
-      for (const a of res?.agents || []) if (a?.id) map[a.id] = a.name || a.id;
-      if (Object.keys(map).length) agentNames = map;
+      return await readAgentRoster();
     } catch (error) {
       dbg('伙伴名单拉取失败：' + (error?.message || error));
+      return null;
     }
   }
   const agentName = (id) => agentNames[id] || id;
@@ -111,6 +129,42 @@ export async function apply(ctx) {
   dbg(`真实用户参与记录恢复 count=${participation.sessions.size}`);
   const backgroundTasks = toastDependencies.backgroundTasks || new BackgroundTaskTracker();
   const deferredTurns = new DeferredTurns();
+  // 「叫醒还欠着」单独记账与暂存：它和后台任务的收齐时机完全不同，混用会互相误取。
+  const waitDebt = toastDependencies.waitDebt || new WaitDebtTracker();
+  // 待补发的回合：会话 id -> { timer, info }。静默期内开工则取消并丢弃。
+  const pendingFlushes = new Map();
+  const flushGraceMs = Number(toastDependencies.deferredFlushGraceMs) > 0
+    ? Number(toastDependencies.deferredFlushGraceMs)
+    : DEFERRED_FLUSH_GRACE_MS;
+
+  // 只管定时器，不碰暂存：暂存的归属在 turn_start / 会话关闭那里统一处理。
+  function cancelPendingFlush(sessionId, reason) {
+    const sid = String(sessionId || '').trim();
+    const pending = pendingFlushes.get(sid);
+    if (!pending) return false;
+    clearTimeout(pending.timer);
+    pendingFlushes.delete(sid);
+    dbg(`补发取消（${reason}）session=${sid}`);
+    return true;
+  }
+
+  function scheduleDeferredFlush(info, sessionId) {
+    const sid = String(sessionId || '').trim();
+    cancelPendingFlush(sid, '重新排期');
+    const timer = setTimeout(() => {
+      // 异常不能变成游离的未处理 Promise：旧代码这行在总线回调的 try/catch 里，
+      // 搬进 setTimeout 后没人接，通知失败会静默无痕。
+      void handleTurnEnd(info, { deferred: true }).catch((error) => {
+        dbg('补发异常：' + (error?.stack || error?.message || error));
+        log?.error?.('[提个醒] 补发异常', { error: error?.message || error });
+      }).finally(() => {
+        pendingFlushes.delete(sid);
+      });
+    }, flushGraceMs);
+    timer.unref?.();
+    pendingFlushes.set(sid, { timer, info });
+    dbg(`后台任务收齐，${flushGraceMs}ms 静默期后再补发 session=${sid}`);
+  }
   const activityNotifications = new ActivityNotificationTracker();
   const sessionIdsByPath = new Map();
   const sessionTitlesByPath = new Map();
@@ -144,12 +198,83 @@ export async function apply(ctx) {
   const notifier = new Notifier(config.get());
 
   // ── 弹窗：两条腿 ──
-  async function notify({ title, body, icon, sound, duration, style }) {
-    const result = await deliverToast({
+  async function deliverNotification({ title, body, icon, sound, duration, style }) {
+    return deliverToast({
       pluginDir: INSTALL_DIR, title, message: body, style, icon, sound, duration, log
     }, (input) => ctx.notifications.show(input), toastDependencies.dependencies);
-    return result.via;
   }
+  async function notify(options) {
+    return (await deliverNotification(options)).via;
+  }
+
+  async function listFocusSoundFiles(customDir) {
+    if (!customDir) return listSounds(dataDir, '');
+    const result = await ctx.resources.list({ kind: 'local-file', path: customDir });
+    const entries = Array.isArray(result)
+      ? result
+      : result?.entries || result?.items || result?.children || result?.files || [];
+    if (!Array.isArray(entries)) return [];
+    const allowed = new Set(['.wav', '.mp3', '.m4a', '.aac']);
+    return entries
+      .map((entry) => typeof entry === 'string' ? entry : entry?.name || entry?.path || entry?.fileName || '')
+      .map((name) => path.basename(String(name)))
+      .filter((name) => allowed.has(path.extname(name).toLowerCase()))
+      .sort();
+  }
+
+  async function focusNotificationPlanHelpers({ agentId, cfg }) {
+    const requestedSound = agentId ? (cfg.agentSounds || {})[agentId] || 'default' : 'default';
+    let approvedCustomSound = null;
+    if (cfg.soundDir && requestedSound !== 'default' && requestedSound !== 'silent') {
+      try {
+        const files = await listFocusSoundFiles(cfg.soundDir);
+        if (files.includes(requestedSound)) {
+          const candidate = resolveSound(dataDir, requestedSound, cfg.soundDir, { allowExternal: true });
+          const stat = candidate ? await ctx.resources.stat({ kind: 'local-file', path: candidate }) : null;
+          if (stat?.exists && !stat.isDirectory) approvedCustomSound = candidate;
+        }
+      } catch (error) {
+        dbg('专注提醒音效未能读取：' + (error?.message || error));
+      }
+    }
+    return {
+      resolveSoundFile: (file) => cfg.soundDir
+        ? (file === requestedSound ? approvedCustomSound : null)
+        : resolveSound(dataDir, file, ''),
+      resolveAgentAvatar: () => null,
+    };
+  }
+
+  function registerFocusNotificationService() {
+    if (typeof ctx.bus?.handle !== 'function') {
+      dbg('专注通知服务未注册：宿主没有 bus.handle');
+      return;
+    }
+    try {
+      const handler = createFocusNotificationHandler({
+        getConfig: () => config.get(),
+        getAgents: readAgentRoster,
+        getCachedAgents: () => agentRoster,
+        getPlanHelpers: focusNotificationPlanHelpers,
+        resolveAvatar: (agentId) => resolveAgentAvatar(agentsHome, agentId, { resources: ctx.resources }),
+        deliver: (toast) => deliverNotification({
+          title: toast.title, body: toast.message, icon: toast.icon,
+          sound: toast.sound, duration: toast.duration, style: toast.style,
+        }),
+        log,
+      });
+      ctx.bus.handle(FOCUS_NOTIFY_SERVICE, async (payload, caller) => {
+        const result = await handler(payload, caller);
+        if (result.suppressed) dbg(`拾光记专注通知按设置拦下 reason=${result.reason}`);
+        else dbg(`拾光记专注通知提交 sent=${result.sent} via=${result.via || 'none'} style=${result.styleId || 'default'}`);
+        return result;
+      }, { allowCrossApp: true });
+      dbg('拾光记专注通知服务已注册');
+    } catch (error) {
+      log?.warn?.('[提个醒] 拾光记专注通知服务未注册', { code: String(error?.code || 'unknown').slice(0, 64) });
+    }
+  }
+  registerFocusNotificationService();
 
   // ── 组装并弹一条 ──
   async function doToast(decision, toastStyle, copyOverride) {
@@ -423,6 +548,7 @@ export async function apply(ctx) {
     // 兜底挂在 turn_end 上是足够的：唯一需要放行的时刻就是完成回合到来时，没有回合就没有提醒需求。
     const expired = backgroundTasks.prune(sessionId, now);
     let releasedByTimeout = false;
+    let debtTimedOut = false;
     if (expired.length) {
       releasedByTimeout = true;
       dbg(`后台任务超时兜底释放 session=${sessionId} task=${expired.join(',')}`);
@@ -438,7 +564,20 @@ export async function apply(ctx) {
       return;
     }
 
-    await notifyTurnEnd(info, sessionId, now, releasedByTimeout);
+    // 叫醒还欠着这个会话：后台任务已经收工，但宿主扣着的结果还没投进来。
+    // 这种「回合结束」只是过程句，绝不能当成说完（2026-10-13 实机取证）。
+    // 压住就行、不补发：真叫醒落地后一定会起新回合，那时 partner 已经说过真正的话了。
+    const expiredDebt = waitDebt.prune(sessionId, now);
+    if (expiredDebt.length) {
+      debtTimedOut = true;
+      dbg(`叫醒超时兜底释放 session=${sessionId} wait=${expiredDebt.join(',')}`);
+    }
+    if (waitDebt.has(sessionId)) {
+      dbg(`等待结果还没投递，本回合不是收尾，暂不提醒 session=${sessionId} remaining=${waitDebt.count(sessionId)}`);
+      return;
+    }
+
+    await notifyTurnEnd(info, sessionId, now, releasedByTimeout || debtTimedOut);
   }
 
   // ── 完成提醒本体（前置检查之外的全部逻辑） ──
@@ -517,15 +656,31 @@ export async function apply(ctx) {
           const done = bg.action === 'remove'
             || ['completed', 'failed', 'canceled', 'aborted'].includes(String(bg.status || '').toLowerCase());
           dbg(`后台任务${done ? '结束' : '开始'} session=${bg.sessionId} task=${bg.taskId} remaining=${backgroundTasks.count(bg.sessionId)}`);
-          // 收齐了就补发被压下的那条完成提醒；补发再走一遍完整前置检查，不绕过任何规则。
+          // 收齐了就排一次补发；但先静默一段，窗口又开工就作废（收齐 ≠ 说完了）。
           if (done && !backgroundTasks.has(bg.sessionId) && deferredTurns.has(bg.sessionId)) {
             const pending = deferredTurns.take(bg.sessionId);
             if (pending) {
-              dbg(`后台任务收齐，补发被压下的完成提醒 session=${bg.sessionId}`);
-              await handleTurnEnd(pending, { deferred: true });
+              scheduleDeferredFlush(pending, bg.sessionId);
             } else {
               dbg(`后台任务收齐，但暂存的完成提醒已过期，丢弃 session=${bg.sessionId}`);
             }
+          }
+          return;
+        }
+
+        // wait_finished：结果已结算，但叫醒可能还被宿主扣着。
+        // state=pending 时这个会话后面一定还有输入，这一回合的「完成」只是过程句。
+        // 非 pending 也要留一行日志：否则实机验证时「没看到记账日志」分不清是
+        // 宿主没发这个事件，还是发了但 state 不是 pending。
+        if (et === 'wait_finished') {
+          const debt = parseWaitDebt(event, sessionPath);
+          if (debt && waitDebt.mark(debt.sessionId, debt.waitId, Date.now())) {
+            dbg(`叫醒还欠着，记一笔 session=${debt.sessionId} wait=${debt.waitId}`);
+          } else if (debt) {
+            dbg(`叫醒欠账记不进去（缺会话键）session=${debt.sessionId || '未知'}`);
+          } else {
+            const state = String(event?.registration?.notification?.state || '(无 notification 层)');
+            dbg(`wait_finished，但不是未投递状态 state=${state}`);
           }
           return;
         }
@@ -551,6 +706,8 @@ export async function apply(ctx) {
               dbg(`会话关闭，清空后台任务计数 session=${closedSid}`);
             }
             deferredTurns.forget(closedSid);
+            cancelPendingFlush(closedSid, '会话关闭');
+            waitDebt.forget(closedSid);
           }
           return;
         }
@@ -573,6 +730,28 @@ export async function apply(ctx) {
           if (sid) {
             participation.mark(sid);
             abnormalTurns.beginUserTurn(sid);
+            // 用户插话意味着那个叫醒作废了；不销账会把后续回合一直压死。
+            if (waitDebt.has(sid)) {
+              waitDebt.clear(sid);
+              dbg(`用户插话，销掉未投递的叫醒欠账 session=${sid}`);
+            }
+          }
+          return;
+        }
+
+        // 回合重新开始：被压住的那句已经确认是过程，直接丢弃不补发。
+        if (et === 'turn_start') {
+          const sid = sessionIdFromPath(sessionPath) || String(event?.sessionId || '');
+          if (sid) {
+            // 收齐后的静默期内又开工 = 那不是收尾，补发作废。
+            cancelPendingFlush(sid, '窗口又开工');
+            // 被压住的那句已经确认是过程，不补发也不堆在内存里。
+            // 无条件做：否则「还没排期就来 turn_start」时暂存会漏掉。
+            deferredTurns.forget(sid);
+            if (waitDebt.has(sid)) {
+              waitDebt.clear(sid);
+              dbg(`叫醒已投递，清账 session=${sid}`);
+            }
           }
           return;
         }

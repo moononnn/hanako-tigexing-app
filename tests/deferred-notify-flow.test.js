@@ -103,6 +103,8 @@ async function withHarness(fn, preferences = {}) {
   );
   const { ctx, seen } = makeCtx(dir);
   toastDependencies.dependencies = { spawnProcess: blockedSpawn, timeoutMs: 200 };
+  // 补发现在先过一段静默期（生产 5 秒），测试里注入短值。
+  toastDependencies.deferredFlushGraceMs = 40;
   try {
     await apply(ctx);
     assert.ok(seen.subscribed, "应该订阅了总线");
@@ -113,6 +115,7 @@ async function withHarness(fn, preferences = {}) {
   } finally {
     toastDependencies.dependencies = undefined;
     toastDependencies.backgroundTasks = null;
+    toastDependencies.deferredFlushGraceMs = null;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }
@@ -152,6 +155,99 @@ test("后台任务在跑时不弹；收齐后补发被压下的那一条", async
     const ok = await waitFor(() => notified.length > 0);
     assert.equal(ok, true, "后台任务收齐后应补发");
     assert.equal(notified.length, 1, "只补一条，不刷屏");
+  });
+});
+
+// 回归 2026-10-14 12:37：后台任务收齐的那一刻，伙伴几乎总要接着干（实测收齐到新回合
+// 开工只隔 95 毫秒）。旧逻辑在收齐瞬间就弹，弹出来时窗口已经复活，工作还在跑。
+test("回归 2026-10-14：收齐后不立刻弹，先过静默期", async () => {
+  await withHarness(async ({ send, notified }) => {
+    send(backgroundTask("upsert", "child-a"));
+    send(turnEnd("先出一版"));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.equal(notified.length, 0);
+
+    send(backgroundTask("remove", "child-a"));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(notified.length, 0, "收齐那一刻不该弹，等静默期过完");
+
+    assert.equal(await waitFor(() => notified.length > 0), true, "静默期到了仍该补发");
+    assert.equal(notified.length, 1);
+  });
+});
+
+test("静默期内窗口又开工，补发作废（那是过程句，不是收尾）", async () => {
+  await withHarness(async ({ send, notified }) => {
+    send(backgroundTask("upsert", "child-a"));
+    send(turnEnd("过程句"));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    send(backgroundTask("remove", "child-a"));
+    send({ type: "turn_start", agentId: "hanako" });   // 叫醒回来了，继续干活
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(notified.length, 0, "又开工了就不该补发那条");
+
+    // 真正说完的那句自然会弹
+    send(turnEnd("这才是真结论"));
+    assert.equal(await waitFor(() => notified.length > 0), true);
+    assert.equal(notified.length, 1);
+    const text = `${notified[0].title || ""} ${notified[0].body || ""}`;
+    assert.match(text, /这才是真结论/);
+    assert.doesNotMatch(text, /过程句/, "过程句不该混进来");
+  });
+});
+
+test("静默期内会话关闭，不补发", async () => {
+  await withHarness(async ({ send, notified }) => {
+    send(backgroundTask("upsert", "child-a"));
+    send(turnEnd("过程句"));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    send(backgroundTask("remove", "child-a"));
+    send({ type: "session_closed", sessionId: SESSION_ID, sessionPath: SESSION_PATH });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    assert.equal(notified.length, 0, "会话没了就不该再补发");
+  });
+});
+
+// 显式锁住一条已知漏报：补发被静默期取消后，如果紧接着的新回合又被用户打断或正文为空，
+// 那条过程句就彻底没人提醒了（用户自己就在窗口里，这个体感可接受，但它确实是漏报）。
+// 写在这里是给下一个人看：这层没有兜底。
+test("已知残留：补发取消后新回合被打断，一条都不弹", async () => {
+  await withHarness(async ({ send, notified }) => {
+    send(backgroundTask("upsert", "child-a"));
+    send(turnEnd("过程句"));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    send(backgroundTask("remove", "child-a"));
+    send({ type: "turn_start", agentId: "hanako" });        // 又开工 → 补发作废
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    send({
+      type: "turn_end",
+      agentId: "hanako",
+      aborted: true,
+      message: { stopReason: "stop", content: [{ type: "text", text: "被用户打断" }] }
+    });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(notified.length, 0, "用户主动打断本来就不该弹（中断回合跳过规则）");
+  });
+});
+
+// 开工晚于静默期：会先弹一条已被取代的过程句，再弹真结论。
+// 这是当前设计的已知代价（宁可多弹也不漏弹），用测试写实，免得后人当成意外。
+test("已知代价：开工晚于静默期时先弹过程句，真结论再弹", async () => {
+  await withHarness(async ({ send, notified }) => {
+    send(backgroundTask("upsert", "child-a"));
+    send(turnEnd("过程句"));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    send(backgroundTask("remove", "child-a"));
+    await new Promise((resolve) => setTimeout(resolve, 250));  // 静默期已过，补发发生
+    assert.equal(notified.length, 1, "静默期过了就该补发");
+
+    send(turnEnd("真结论"));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.ok(notified.length >= 1);
   });
 });
 

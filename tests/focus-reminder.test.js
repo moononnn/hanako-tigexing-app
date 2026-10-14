@@ -20,7 +20,10 @@ test('焦点未知兜底在设置页如实展示，保持原档位值', () => {
 });
 
 test('所有通知调用方等待交付结果，而非将Promise当成功', () => {
-  assert.match(entry, /await deliverToast/);
+  // index.js 里的通知出口收敛到 deliverNotification：它必须把 deliverToast 的
+  // Promise 原样交出去，不能只 fire-and-forget。外层 notify 再 await 它。
+  assert.match(entry, /async function deliverNotification\([^)]*\)\s*\{\s*return deliverToast\(/);
+  assert.match(entry, /const notify = async|async function notify\([^)]*\)[^{]*\{\s*return \(await deliverNotification/);
   assert.equal((routes.match(/await deliverToast\(/g) || []).length, 3);
   assert.doesNotMatch(routes, /\bsendToast\(/);
   assert.match(routes, /ok: sent/);
