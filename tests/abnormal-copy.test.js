@@ -27,8 +27,8 @@ test("异常文案：识别五小时用量额度，并对未知错误保留脱�
   assert.match(detail, /secret=\[已隐藏\]/);
   const linked = failureReasonLabel("Unexpected endpoint: https://example.test/path");
   assert.doesNotMatch(linked, /https:\/\/example\.test/);
-  const pathDetail = failureReasonLabel("Unexpected file: C:\\Users\\private\\case.txt");
-  assert.doesNotMatch(pathDetail, /C:\\Users\\private/);
+  const pathDetail = failureReasonLabel("Unexpected file: C:\\Cases\\private\\case.txt");
+  assert.doesNotMatch(pathDetail, /C:\\Cases\\private/);
   const sessionIdDetail = failureReasonLabel("Unexpected response sessionId=abc12345678901234567890");
   assert.doesNotMatch(sessionIdDetail, /abc12345678901234567890/);
   assert.doesNotMatch(sessionIdDetail, /abc1/);
@@ -47,7 +47,7 @@ test("异常文案：识别五小时用量额度，并对未知错误保留脱�
   assert.doesNotMatch(clientSecretDetail, /zzzz111122223333/);
   const uncPathDetail = failureReasonLabel(String.raw`Unexpected file: \\private-server\share\secret\report.docx`);
   assert.doesNotMatch(uncPathDetail, /private-server|report\.docx/);
-  const spacedPathDetail = failureReasonLabel(String.raw`Unexpected file: C:\Users\person\OneDrive - Team\secret\report.docx, retry`);
+  const spacedPathDetail = failureReasonLabel(String.raw`Unexpected file: C:\Person\OneDrive - Team\secret\report.docx, retry`);
   assert.doesNotMatch(spacedPathDetail, /OneDrive - Team|report\.docx/);
   assert.match(spacedPathDetail, /retry/);
   const spacedUncPathDetail = failureReasonLabel(String.raw`Unexpected file: \\private-server\share name\secret report.docx, retry`);
@@ -59,7 +59,7 @@ test("异常文案：识别五小时用量额度，并对未知错误保留脱�
   const forwardSlashUncPathDetail = failureReasonLabel(String.raw`Unexpected file: //private-server/share name/secret/report.docx, retry`);
   assert.doesNotMatch(forwardSlashUncPathDetail, /private-server|report\.docx/);
   assert.match(forwardSlashUncPathDetail, /retry/);
-  const fileUriDetail = failureReasonLabel(String.raw`Unexpected file: file:///C:/Users/person/OneDrive%20-%20Team/secret/report.docx, retry`);
+  const fileUriDetail = failureReasonLabel(String.raw`Unexpected file: file:///C:/Person/OneDrive%20-%20Team/secret/report.docx, retry`);
   assert.doesNotMatch(fileUriDetail, /file:\/\/\/C:|OneDrive|report\.docx/);
   assert.match(fileUriDetail, /retry/);
 });

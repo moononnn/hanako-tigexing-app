@@ -30,7 +30,7 @@ test("非 turn_end 事件返回 null", () => {
 // ── session_background_task（子 agent 完成门） ──
 
 test("session_background_task：解析开始/结束及会话路径", () => {
-  const sp = "C:/Users/x/.hanako/agents/hanako/sessions/main.jsonl";
+  const sp = "C:/agentdata/x/.hanako/agents/hanako/sessions/main.jsonl";
   assert.deepEqual(parseSessionBackgroundTask({
     type: "session_background_task",
     action: "upsert",
@@ -106,7 +106,7 @@ test("activity_update：非 cron/heartbeat 返回 null", () => {
 
 test("turn_end 解析 agentId / sessionId / sessionPath", () => {
   const ev = { type: "turn_end", agentId: "hanako", message: { role: "assistant", content: [] } };
-  const sp = "C:/Users/x/.hanako/agents/hanako/sessions/2026-01-01T00-00-00Z_abc.jsonl";
+  const sp = "C:/agentdata/x/.hanako/agents/hanako/sessions/2026-01-01T00-00-00Z_abc.jsonl";
   const r = parseTurnEnd(ev, sp);
   assert.equal(r.agentId, "hanako");
   assert.equal(r.sessionId, "2026-01-01T00-00-00Z_abc");
@@ -191,7 +191,7 @@ test("提取文本：空内容返回空串", () => {
 });
 
 test("sessionIdFromPath 兼容反斜杠与大小写", () => {
-  assert.equal(sessionIdFromPath("C:\\Users\\x\\.hanako\\agents\\hanako\\sessions\\abc.jsonl"), "abc");
+  assert.equal(sessionIdFromPath("C:\\agentdata\\x\\.hanako\\agents\\hanako\\sessions\\abc.jsonl"), "abc");
   assert.equal(sessionIdFromPath(".../sessions/ABC.JSONL"), "ABC");
   assert.equal(sessionIdFromPath(null), "");
   assert.equal(sessionIdFromPath(""), "");
@@ -234,7 +234,7 @@ test("普通完成提醒只发送未中断的最终回合", () => {
 
 // ── 异常回合事件（只观察，不续接） ──
 
-const sessionPath = "C:/Users/x/.hanako/agents/hanako/sessions/turn-1.jsonl";
+const sessionPath = "C:/agentdata/x/.hanako/agents/hanako/sessions/turn-1.jsonl";
 
 test("异常事件：从 sessionPath 推导助手和会话", () => {
   assert.equal(agentIdFromSessionPath(sessionPath), "hanako");
