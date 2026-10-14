@@ -17,9 +17,13 @@ preferences.json
 index.probe.js
 ui/probe.html
 probe-result.json
+lib/state-probe.js
 
 # 临时与备份
 node_modules/
 _backups/
 *.zip
 *.bak
+
+# 云构建安装元数据（本机安装痕迹，不进公开仓库）
+.cloud-build/.installed-by.json
