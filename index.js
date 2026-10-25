@@ -43,6 +43,7 @@ import { WaitDebtTracker, parseWaitDebt } from './lib/wait-debt.js';
 import { resolveAgentAvatar } from './lib/agent-avatar.js';
 import { listSounds, resolveSound } from './lib/sounds.js';
 import { normalizeSessionPath, parseSessionIdentity, resolveSessionTitleWithRetry } from './lib/session-title.js';
+import { codeMarker, createSessionMetaResolver, isCodeSession, pickSoundId, pickStyleId } from './lib/session-kind.js';
 import { createRefineModelConfig } from './lib/refine-model.js';
 import { buildNotificationCopy } from './lib/notification-copy.js';
 import { createFocusNotificationHandler, FOCUS_NOTIFY_SERVICE } from './lib/focus-notify.js';
@@ -195,6 +196,8 @@ export async function apply(ctx) {
 
   // ── 配置 ──
   const config = createConfigManager({ dataDir, pluginId: APP_ID, log });
+  // 分区判断：Code 页窗口的会话不在 session:list 里，只能按 id / 路径单查。
+  const resolveSessionMeta = createSessionMetaResolver({ bus: ctx.bus, debug: dbg });
   const refineModelConfig = createRefineModelConfig({ ctx, dataDir });
   const notifier = new Notifier(config.get());
 
@@ -280,7 +283,20 @@ export async function apply(ctx) {
   // ── 组装并弹一条 ──
   async function doToast(decision, toastStyle, copyOverride) {
     const cfg = config.get();
-    const styleId = (cfg.agentStyles || {})[decision.agentId] || 'default';
+    // 先弄清这条提醒是普通窗口还是 Code 页窗口：它同时决定标题记号、文案风格和音效。
+    // 查不到就按普通窗口走，绝不让一次查询失败拖住或丢掉提醒。
+    const sessionMeta = await resolveSessionMeta({
+      sessionId: decision.sessionId,
+      sessionPath: decision.sessionPath
+    });
+    const sessionNamespace = sessionMeta.namespace;
+    const inCode = isCodeSession(sessionNamespace);
+    const styleId = pickStyleId({
+      inCode,
+      agentId: decision.agentId,
+      codeStyles: cfg.agentCodeStyles,
+      styles: cfg.agentStyles
+    });
     const style = getStyle(styleId);
 
     // 跟旧版一致：先生成通知正文，再读取会话标题，给宿主异步起名留时间。
@@ -296,7 +312,7 @@ export async function apply(ctx) {
       count: decision.count
     });
     const sessionKey = normalizeSessionPath(decision.sessionPath);
-    let sessionTitle = sessionTitlesByPath.get(sessionKey) || await resolveSessionTitleWithRetry({
+    let sessionTitle = sessionTitlesByPath.get(sessionKey) || sessionMeta.title || await resolveSessionTitleWithRetry({
       bus: ctx.bus,
       sessionPath: decision.sessionPath,
       sessionId: sessionIdsByPath.get(sessionKey),
@@ -306,7 +322,8 @@ export async function apply(ctx) {
     });
     // 查询期间可能收到自动起名/手动改名事件，不丢掉刚到的真实标题。
     sessionTitle = sessionTitlesByPath.get(sessionKey) || sessionTitle;
-    const title = sessionPrefix(sessionTitle) + copy.title;
+    // Code 窗口的记号紧贴标题最前面，比会话标题更能一眼认出「这是代码窗口那边收工了」。
+    const title = codeMarker(sessionNamespace) + sessionPrefix(sessionTitle) + copy.title;
     const body = copy.body;
     if (copy.refineError) {
       dbg('文案润色失败，回退规则版：' + (copy.refineError?.message || copy.refineError));
@@ -315,6 +332,7 @@ export async function apply(ctx) {
     const refineConfig = refineModelConfig.getConfig();
     dbg('通知文案 ' + JSON.stringify({
       style: styleId, refined: copy.refined, sessionTitle: sessionTitle || null,
+      namespace: sessionNamespace || null, inCode,
       inputChars: (decision.refineText || decision.snippet || '').length,
       snippet: decision.snippet, body,
       source: copy.refined ? (refineConfig.modelSource || 'agent') : 'rule',
@@ -332,7 +350,12 @@ export async function apply(ctx) {
       dbg('伙伴头像读取失败：' + (error?.message || error));
     }
 
-    const soundCfg = (cfg.agentSounds || {})[decision.agentId] || 'default';
+    const soundCfg = pickSoundId({
+      inCode,
+      agentId: decision.agentId,
+      codeSounds: cfg.agentCodeSounds,
+      sounds: cfg.agentSounds
+    });
     let sound;
     if (soundCfg === 'silent') sound = 'silent';
     else if (soundCfg && soundCfg !== 'default') {

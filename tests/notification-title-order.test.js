@@ -13,7 +13,8 @@ test('实际入口先完成正文生成，再读取真实会话标题', () => {
   assert.ok(copyAt >= 0 && lookupAt > copyAt);
   assert.doesNotMatch(entry.slice(copyAt, lookupAt), /count: decision\.count,\s*sessionTitle/);
   assert.match(entry, /sessionTitle = sessionTitlesByPath\.get\(sessionKey\) \|\| sessionTitle/);
-  assert.match(entry, /const title = sessionPrefix\(sessionTitle\) \+ copy\.title/);
+  // Code 页窗口的记号必须在最前面，比会话标题还靠前；没有记号时退化成老写法。
+  assert.match(entry, /const title = codeMarker\(sessionNamespace\) \+ sessionPrefix\(sessionTitle\) \+ copy\.title/);
 });
 
 test('模型与规则版都只加一次对话框前缀，正文不受影响', async () => {

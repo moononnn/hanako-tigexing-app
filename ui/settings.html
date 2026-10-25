@@ -108,10 +108,11 @@
     display: block; font-size: 13.5px; font-weight: 600; color: var(--ink); margin-bottom: 5px;
   }
   .snd-folder-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  /* 七列：伙伴 / 文案风格 / 音效 / Code 文案 / Code 音效 / 提醒时机 / 操作 */
   .snd-head, .snd-row {
     display: grid;
-    grid-template-columns: minmax(60px, .8fr) minmax(104px, 1fr) minmax(96px, 1fr) minmax(132px, 1.2fr) minmax(132px, auto);
-    gap: 8px; align-items: center;
+    grid-template-columns: minmax(58px, .8fr) minmax(92px, 1fr) minmax(84px, .95fr) minmax(92px, 1fr) minmax(84px, .95fr) minmax(112px, 1.1fr) minmax(128px, auto);
+    gap: 6px; align-items: center;
   }
   .snd-row {
     padding: 8px 2px; border-bottom: 1px dashed var(--line-soft);
@@ -123,8 +124,13 @@
     padding: 2px 2px 6px; font-size: 13px; color: var(--ink-soft); font-weight: 600;
     font-family: "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
   }
-  .snd-head .col-style, .snd-head .col-sound, .snd-head .col-trigger { min-width: 0; }
-  .snd-head .col-action { min-width: 132px; }
+  /* Code 两列表头换个颜色，一眼分清普通窗口与代码窗口的配置 */
+  .snd-head .col-code { color: var(--accent-deep); }
+  .snd-head .col-style, .snd-head .col-sound, .snd-head .col-trigger, .snd-head .col-code { min-width: 0; }
+  .snd-head .col-action { min-width: 128px; }
+  /* Code 那两列的下拉略矮一点，避免七个控件挤成一片 */
+  .snd-row .dd[data-kind="codeStyle"] .dd-trigger,
+  .snd-row .dd[data-kind="codeSound"] .dd-trigger { min-height: 34px; padding: 6px 8px; font-size: 13px; }
   .snd-actions { display: flex; gap: 6px; align-items: center; min-width: 0; }
   .snd-actions .mini { width: auto; flex: 1; min-width: 0; }
   .snd-row .dd-trigger {
@@ -207,6 +213,8 @@
     .snd-row .dd[data-kind="style"] { grid-column: 1; }
     .snd-row .dd[data-kind="trigger"] { grid-column: 2; }
     .snd-row .dd[data-kind="sound"] { grid-column: 1 / -1; }
+    .snd-row .dd[data-kind="codeStyle"] { grid-column: 1; }
+    .snd-row .dd[data-kind="codeSound"] { grid-column: 2; }
     .snd-row .snd-actions { grid-column: 1 / -1; justify-self: start; width: 100%; }
     .snd-row .snd-actions .mini { width: auto; }
   }
@@ -631,6 +639,7 @@
   <div class="card">
     <h2>按助手个性化</h2>
     <div class="hint" style="margin-bottom:8px">每个助手可以配不同的音效、通知风格和提醒时机。风格只改变标题语气和正文包装，正文永远显示助手原话，不改写不生成；音效用你放进来的音频文件；提醒时机只影响「聊天回复完成」，选「跟随全局」就用上面全局档位。</div>
+    <div class="hint" style="margin-bottom:8px">右边两列是 <b>Code 窗口</b>专用的文案和音效。Code 窗口弹出的提醒标题前面会带一个「〔Code〕」记号，一眼就能认出它是代码窗口那边收工了。两列默认都是「跟随普通模式」，不碰就和左边完全一样；想分开配就在这两列里选。</div>
     <div class="hint" style="margin-bottom:8px">🎁 方言风格和「学我说话」<b>这一版暂时用不了</b>：它们原本靠表情包联动挂载，表情包换形态后路径对不上，所以风格列表里暂时不会出现这两类，以后修。其他风格照常。</div>
     <div class="snd-folder">
       <label class="snd-folder-label" for="in-snd-dir">音效文件夹</label>
@@ -1490,13 +1499,16 @@ function boot() {
   }
 
   // ── 按助手个性化（风格 + 音效） ──
-  var sndData = { files: [], agents: [], assignments: {}, styleAssignments: {}, triggerAssignments: {}, styles: [] };
+  var sndData = { files: [], agents: [], assignments: {}, styleAssignments: {}, triggerAssignments: {}, codeAssignments: {}, codeStyleAssignments: {}, styles: [] };
   var esc = function (s) {
     return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   };
   var sndVal = function (a) { return sndData.assignments[a.id] || "default"; };
   var styleVal = function (a) { return sndData.styleAssignments[a.id] || "default"; };
   var triggerVal = function (a) { return sndData.triggerAssignments[a.id] || "default"; };
+  // Code 窗口：没配就是空串 = 跟随普通窗口（默认状态，用户不碰就不用管）
+  var codeSndVal = function (a) { return sndData.codeAssignments[a.id] || ""; };
+  var codeStyleVal = function (a) { return sndData.codeStyleAssignments[a.id] || ""; };
   // 提醒时机：default=跟随全局；其余四档按助手覆盖（聊天回复完成档）
   var TRIGGER_OPTIONS = [
     ["default", "跟随全局"],
@@ -1515,6 +1527,15 @@ function boot() {
   }
 
   function styleOptions(a) {
+    return buildStyleOptions(styleVal(a), null);
+  }
+
+  // Code 窗口的风格表：第一项是「跟随普通窗口」，选了就把该助手的单独设置删掉
+  function codeStyleOptions(a) {
+    return buildStyleOptions(codeStyleVal(a) || "", '跟随普通模式');
+  }
+
+  function buildStyleOptions(current, followLabel) {
     // 按分组渲染 <optgroup>（beautify-select 面板里会变成手帐风组头 + 可收合）
     var groups = {};
     var order = [];
@@ -1525,12 +1546,15 @@ function boot() {
       groups[g].items.push(st);
     }
     var opts = "";
+    if (followLabel) {
+      opts += '<option value=""' + (current === "" ? " selected" : "") + ">" + followLabel + "</option>";
+    }
     for (var gi = 0; gi < order.length; gi++) {
       var grp = groups[order[gi]];
       opts += '<optgroup label="' + esc(grp.label) + '">';
       for (var j = 0; j < grp.items.length; j++) {
         var st2 = grp.items[j];
-        var sel = styleVal(a) === st2.id ? " selected" : "";
+        var sel = current === st2.id ? " selected" : "";
         opts += '<option value="' + esc(st2.id) + '"' + sel + ">" + esc(st2.label) + "</option>";
       }
       opts += "</optgroup>";
@@ -1539,10 +1563,23 @@ function boot() {
   }
 
   function sndOptions(a) {
-    var opts = '<option value="default">系统默认</option><option value="silent">静音</option>';
+    return buildSoundOptions(sndVal(a), null);
+  }
+
+  function codeSoundOptions(a) {
+    return buildSoundOptions(codeSndVal(a) || "", '跟随普通模式');
+  }
+
+  function buildSoundOptions(current, followLabel) {
+    var opts = "";
+    if (followLabel) {
+      opts += '<option value=""' + (current === "" ? " selected" : "") + ">" + followLabel + "</option>";
+    }
+    opts += '<option value="default"' + (current === "default" ? " selected" : "") + '>系统默认</option>';
+    opts += '<option value="silent"' + (current === "silent" ? " selected" : "") + '>静音</option>';
     for (var i = 0; i < sndData.files.length; i++) {
       var f = sndData.files[i];
-      var sel = sndVal(a) === f ? " selected" : "";
+      var sel = current === f ? " selected" : "";
       opts += '<option value="' + esc(f) + '"' + sel + ">" + esc(f) + "</option>";
     }
     return opts;
@@ -1557,6 +1594,8 @@ function boot() {
           assignments: r.assignments || {},
           styleAssignments: r.styleAssignments || {},
           triggerAssignments: r.triggerAssignments || {},
+          codeAssignments: r.codeAssignments || {},
+          codeStyleAssignments: r.codeStyleAssignments || {},
           styles: r.styles || [],
           hiddenAgents: r.hiddenAgents || []
         };
@@ -1573,28 +1612,42 @@ function boot() {
           list.innerHTML = '<div class="empty">没有找到助手</div>';
           return;
         }
-        var html = '<div class="snd-head"><span class="who"></span><span class="col-style">文案风格</span><span class="col-sound">音效</span><span class="col-trigger">提醒时机</span><span class="col-action" aria-hidden="true"></span></div>';
+        var html = '<div class="snd-head"><span class="who"></span><span class="col-style">文案风格</span><span class="col-sound">音效</span><span class="col-code">Code 文案</span><span class="col-code">Code 音效</span><span class="col-trigger">提醒时机</span><span class="col-action" aria-hidden="true"></span></div>';
         for (var i = 0; i < sndData.agents.length; i++) {
           var a = sndData.agents[i];
           html += '<div class="snd-row"><span class="who">' + esc(a.name) + "</span>" +
             '<select data-agent="' + esc(a.id) + '" data-kind="style">' + styleOptions(a) + "</select>" +
             '<select data-agent="' + esc(a.id) + '" data-kind="sound">' + sndOptions(a) + "</select>" +
+            '<select data-agent="' + esc(a.id) + '" data-kind="codeStyle" title="代码窗口里的提醒用哪套文案；跟随普通模式 = 和左边一样">' + codeStyleOptions(a) + "</select>" +
+            '<select data-agent="' + esc(a.id) + '" data-kind="codeSound" title="代码窗口里的提醒用哪个音效；跟随普通模式 = 和左边一样">' + codeSoundOptions(a) + "</select>" +
             '<select data-agent="' + esc(a.id) + '" data-kind="trigger" title="聊天回复完成按这个档位提醒；跟随全局=用上面全局档位">' + triggerOptions(a) + "</select>" +
-            '<span class="snd-actions"><button class="mini" data-preview="' + esc(a.id) + '">看看效果</button></span></div>';
+            '<span class="snd-actions"><button class="mini" data-preview="' + esc(a.id) + '" data-mode="normal">试听</button>' +
+            '<button class="mini" data-preview="' + esc(a.id) + '" data-mode="code">Code</button></span></div>';
         }
         list.innerHTML = html;
         list.querySelectorAll("select").forEach(function (sel) { beautifySelect(sel); });
         list.querySelectorAll("select").forEach(function (sel) {
           sel.addEventListener("change", function () {
             var kind = sel.dataset.kind;
-            var path = kind === "style" ? "/api/agents/style" : kind === "trigger" ? "/api/agents/trigger" : "/api/sounds/assign";
+            var isCode = kind === "codeStyle" || kind === "codeSound";
+            var path = kind === "style" || kind === "codeStyle"
+              ? "/api/agents/style"
+              : kind === "trigger"
+                ? "/api/agents/trigger"
+                : "/api/sounds/assign";
             api(path, {
               method: "POST",
-              body: JSON.stringify({ agentId: sel.dataset.agent, value: sel.value })
+              body: JSON.stringify({
+                agentId: sel.dataset.agent,
+                value: sel.value,
+                mode: isCode ? "code" : "normal"
+              })
             }).then(function (rr) {
               if (rr.ok && kind === "style") sndData.styleAssignments = rr.assignments || {};
               if (rr.ok && kind === "sound") sndData.assignments = rr.assignments || {};
               if (rr.ok && kind === "trigger") sndData.triggerAssignments = rr.assignments || {};
+              if (rr.ok && kind === "codeStyle") sndData.codeStyleAssignments = rr.assignments || {};
+              if (rr.ok && kind === "codeSound") sndData.codeAssignments = rr.assignments || {};
               showTip("snd-tip", rr.ok ? "已保存 ✓" : "保存失败：" + (rr.error || "未知原因"), rr.ok ? 1500 : 3000);
             }).catch(function () { showTip("snd-tip", "保存失败", 3000); });
           });
@@ -1602,14 +1655,23 @@ function boot() {
         list.querySelectorAll("[data-preview]").forEach(function (btn) {
           btn.addEventListener("click", function () {
             var aid = btn.dataset.preview;
+            var wantCode = btn.dataset.mode === "code";
             // 所见即所得：直接读下拉控件当前选中值（不等保存时序），没有对应控件才回退已保存配置
-            var styleSel = list.querySelector('select[data-kind="style"][data-agent="' + aid + '"]');
-            var soundSel = list.querySelector('select[data-kind="sound"][data-agent="' + aid + '"]');
-            var styleValue = styleSel ? styleSel.value : (sndData.styleAssignments[aid] || "default");
-            var value = soundSel ? soundSel.value : (sndData.assignments[aid] || "default");
+            var styleKind = wantCode ? "codeStyle" : "style";
+            var soundKind = wantCode ? "codeSound" : "sound";
+            var styleSel = list.querySelector('select[data-kind="' + styleKind + '"][data-agent="' + aid + '"]');
+            var soundSel = list.querySelector('select[data-kind="' + soundKind + '"][data-agent="' + aid + '"]');
+            var fallbackStyle = wantCode
+              ? (sndData.codeStyleAssignments[aid] || sndData.styleAssignments[aid] || "default")
+              : (sndData.styleAssignments[aid] || "default");
+            var fallbackSound = wantCode
+              ? (sndData.codeAssignments[aid] || sndData.assignments[aid] || "default")
+              : (sndData.assignments[aid] || "default");
+            var styleValue = styleSel && styleSel.value ? styleSel.value : fallbackStyle;
+            var value = soundSel && soundSel.value ? soundSel.value : fallbackSound;
             api("/api/sound/preview", {
               method: "POST",
-              body: JSON.stringify({ agentId: aid, file: value === "default" ? "" : value, style: styleValue })
+              body: JSON.stringify({ agentId: aid, file: value === "default" ? "" : value, style: styleValue, mode: wantCode ? "code" : "normal" })
             }).then(function (rr) {
               showTip("snd-tip", rr.sent ? "提醒已提交，留意弹窗和提示音" : "发送失败", 2500);
             }).catch(function () { showTip("snd-tip", "请求失败", 3000); });

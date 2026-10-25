@@ -287,6 +287,9 @@ export default function (app, ctx) {
       }),
       assignments: cfg.agentSounds || {},
       styleAssignments: cfg.agentStyles || {},
+      // Code 页窗口单独分配：空对象 / 没这个助手 = 跟随普通窗口
+      codeAssignments: cfg.agentCodeSounds || {},
+      codeStyleAssignments: cfg.agentCodeStyles || {},
       triggerAssignments: cfg.agentTriggers || {}
     });
   });
@@ -366,13 +369,20 @@ export default function (app, ctx) {
     const body = await c.req.json().catch(() => ({}));
     const agentId = String(body.agentId || "").trim();
     const value = String(body.value || "default").trim();
+    // mode=code 写 Code 页窗口那一栏；空串 = 删掉该助手的单独设置，回到跟随普通窗口
+    const field = String(body.mode || "normal").trim() === "code" ? "agentCodeStyles" : "agentStyles";
     if (!agentId) return c.json({ ok: false, error: "missing agentId" });
-    if (!getStyleIds().includes(value)) return c.json({ ok: false, error: "unknown style" });
     const cfg = configManager.get();
-    const next = { ...(cfg.agentStyles || {}) };
+    const next = { ...(cfg[field] || {}) };
+    if (value === "" && field === "agentCodeStyles") {
+      delete next[agentId];
+      await configManager.patch({ [field]: next });
+      return c.json({ ok: true, assignments: configManager.get()[field] || {} });
+    }
+    if (!getStyleIds().includes(value)) return c.json({ ok: false, error: "unknown style" });
     next[agentId] = value;
-    await configManager.patch({ agentStyles: next });
-    return c.json({ ok: true, assignments: configManager.get().agentStyles || {} });
+    await configManager.patch({ [field]: next });
+    return c.json({ ok: true, assignments: configManager.get()[field] || {} });
   });
 
   // 按助手提醒时机（v0.5.0）：聊天回复完成的档位按助手覆盖；「跟随全局」= 不存该助手
@@ -445,20 +455,28 @@ export default function (app, ctx) {
   app.post("/api/sounds/assign", async (c) => {
     const body = await c.req.json().catch(() => ({}));
     const agentId = String(body.agentId || "").trim();
-    const value = String(body.value || "default").trim();
+    const value = String(body.value ?? "default").trim();
+    // mode=code 写 Code 页窗口那一栏；空串 = 删掉该助手的单独设置，回到跟随普通窗口
+    const field = String(body.mode || "normal").trim() === "code" ? "agentCodeSounds" : "agentSounds";
     if (!agentId) return c.json({ ok: false, error: "missing agentId" });
     const cfg = configManager.get();
+    const next = { ...(cfg[field] || {}) };
+    if (value === "" && field === "agentCodeSounds") {
+      delete next[agentId];
+      await configManager.patch({ [field]: next });
+      return c.json({ ok: true, assignments: configManager.get()[field] || {} });
+    }
     // 值白名单：default / silent / 存在的音效文件名（按当前生效目录）
-    if (value !== "default" && value !== "silent") {
+    const effective = value === "" ? "default" : value;
+    if (effective !== "default" && effective !== "silent") {
       let files = [];
       try { files = await listSoundFiles(cfg.soundDir); }
       catch (error) { return c.json({ ok: false, error: "读取音效文件夹失败：" + (error?.message || error) }); }
-      if (!files.includes(value)) return c.json({ ok: false, error: "unknown sound file" });
+      if (!files.includes(effective)) return c.json({ ok: false, error: "unknown sound file" });
     }
-    const next = { ...(cfg.agentSounds || {}) };
-    next[agentId] = value;
-    await configManager.patch({ agentSounds: next });
-    return c.json({ ok: true, assignments: configManager.get().agentSounds || {} });
+    next[agentId] = effective;
+    await configManager.patch({ [field]: next });
+    return c.json({ ok: true, assignments: configManager.get()[field] || {} });
   });
 
   app.post("/api/sound/preview", async (c) => {
@@ -467,11 +485,13 @@ export default function (app, ctx) {
     const file = (body && body.file) || c.req.query("file") || "";
     const agentId = String((body && body.agentId) || "").trim();
     const reqStyle = String((body && body.style) || "").trim();
+    const wantCode = String((body && body.mode) || "").trim() === "code";
     const cfg = configManager.get();
     // 风格优先用请求里当前选中的值（所见即所得，不等保存时序）；没传才回退已保存配置
-    const styleId = reqStyle && getStyleIds().includes(reqStyle)
-      ? reqStyle
-      : (cfg.agentStyles || {})[agentId] || "default";
+    const fallbackStyle = wantCode
+      ? ((cfg.agentCodeStyles || {})[agentId] || (cfg.agentStyles || {})[agentId] || "default")
+      : ((cfg.agentStyles || {})[agentId] || "default");
+    const styleId = reqStyle && getStyleIds().includes(reqStyle) ? reqStyle : fallbackStyle;
     const style = getStyle(styleId);
     const partners = await listPartnersFromHost();
     const partner = partners.find((item) => item.id === agentId);
@@ -486,7 +506,7 @@ export default function (app, ctx) {
     const sample = PREVIEW_SAMPLES[styleId] || PREVIEW_SAMPLES.default;
     const { sent, via } = await deliverToast({
       pluginDir,
-      title: style.title("first", name, 1),
+      title: (wantCode ? "〔Code〕" : "") + style.title("first", name, 1),
       message: style.body("first", sample, 1),
       style: cfg.toastStyle,
       // 头像名经 ResourceIO 授权列出，Toast 子进程读取具体路径。
@@ -508,8 +528,15 @@ export default function (app, ctx) {
     const agentId = String(body.agentId || (visiblePartners[0] && visiblePartners[0].id) || "").trim();
     const partner = visiblePartners.find((item) => item.id === agentId);
     const name = partner ? partner.name : agentId || "助手";
-    const style = getStyle((cfg.agentStyles || {})[agentId] || "default");
-    const soundCfg = (cfg.agentSounds || {})[agentId] || "default";
+    // mode=code 时用 Code 页窗口那一栏的设置试弹，方便在设置页当场听出区别
+    const wantCode = String(body.mode || "normal").trim() === "code";
+    const styleId = wantCode
+      ? ((cfg.agentCodeStyles || {})[agentId] || (cfg.agentStyles || {})[agentId] || "default")
+      : ((cfg.agentStyles || {})[agentId] || "default");
+    const style = getStyle(styleId);
+    const soundCfg = wantCode
+      ? ((cfg.agentCodeSounds || {})[agentId] || (cfg.agentSounds || {})[agentId] || "default")
+      : ((cfg.agentSounds || {})[agentId] || "default");
     let sound;
     if (soundCfg === "silent") sound = "silent";
     else if (soundCfg !== "default") {
@@ -530,7 +557,7 @@ export default function (app, ctx) {
     }
     const { sent, via } = await deliverToast({
       pluginDir,
-      title: copy.title,
+      title: (wantCode ? "〔Code〕" : "") + copy.title,
       message: copy.body,
       style: cfg.toastStyle,
       icon: await getPartnerAvatar(agentId) || undefined,
