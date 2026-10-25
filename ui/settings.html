@@ -14,6 +14,10 @@
     --accent: #5DAE8E;        /* 薄荷绿主 */
     --accent-deep: #4A9277;
     --accent-soft: #E4F0EA;
+    /* Code 窗口那屏的配色：雾蓝，跟薄荷绿拉开距离 */
+    --code-accent: #5C7FA6;
+    --code-deep: #47688C;
+    --code-soft: #EEF3F9;
     --pink: #E89BB0;          /* 樱花粉点缀 */
     --pink-soft: #FBEDF1;
     --line: rgba(93,122,107,.20);
@@ -108,11 +112,55 @@
     display: block; font-size: 13.5px; font-weight: 600; color: var(--ink); margin-bottom: 5px;
   }
   .snd-folder-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  /* 七列：伙伴 / 文案风格 / 音效 / Code 文案 / Code 音效 / 提醒时机 / 操作 */
+  /* 聊天 / Code 两屏切换：填充色就是状态，绿=聊天，蓝灰=Code */
+  .snd-mode-switch {
+    display: inline-flex; gap: 4px; padding: 4px; border-radius: 999px;
+    background: rgba(93, 122, 107, .10); margin-bottom: 10px;
+  }
+  .snd-mode-switch button {
+    appearance: none; border: 0; background: transparent; cursor: pointer;
+    font-family: inherit; font-size: 13.5px; font-weight: 600; color: var(--ink-soft);
+    padding: 9px 20px; border-radius: 999px; transition: background-color .18s, color .18s;
+  }
+  .snd-mode-switch button[aria-selected="true"] { color: #fff; }
+  .snd-mode-switch button[data-mode="chat"][aria-selected="true"] { background: var(--accent); }
+  .snd-mode-switch button[data-mode="code"][aria-selected="true"] { background: var(--code-accent); }
+  .snd-mode-note {
+    font-size: 13.5px; line-height: 1.6; padding: 11px 13px; border-radius: 12px;
+    margin-bottom: 10px; border: 1px solid transparent;
+  }
+  #snd-list[data-mode="chat"] + .snd-mode-note, .snd-mode-note[data-mode="chat"] {
+    background: var(--accent-soft); color: var(--accent-deep); border-color: rgba(93, 174, 142, .28);
+  }
+  .snd-mode-note[data-mode="code"] {
+    background: var(--code-soft); color: var(--code-deep); border-color: rgba(92, 127, 166, .28);
+  }
+  .snd-mode-note b { font-weight: 700; }
+
+  /* 表格：聊天 5 列（含提醒时机），Code 4 列（提醒时机跟聊天一致，不单列） */
   .snd-head, .snd-row {
     display: grid;
-    grid-template-columns: minmax(58px, .8fr) minmax(92px, 1fr) minmax(84px, .95fr) minmax(92px, 1fr) minmax(84px, .95fr) minmax(112px, 1.1fr) minmax(128px, auto);
-    gap: 6px; align-items: center;
+    gap: 8px; align-items: center;
+  }
+  #snd-list[data-mode="chat"] .snd-head,
+  #snd-list[data-mode="chat"] .snd-row {
+    grid-template-columns: minmax(60px, .8fr) minmax(104px, 1fr) minmax(96px, 1fr) minmax(132px, 1.2fr) minmax(132px, auto);
+  }
+  #snd-list[data-mode="code"] .snd-head,
+  #snd-list[data-mode="code"] .snd-row {
+    grid-template-columns: minmax(60px, .8fr) minmax(116px, 1.15fr) minmax(106px, 1.05fr) minmax(132px, auto);
+  }
+  /* Code 屏整块换个底色，和聊天那屏分开 */
+  #snd-list[data-mode="code"] {
+    background: var(--code-soft); border: 1px solid rgba(92, 127, 166, .22);
+    border-radius: 14px; padding: 2px 12px 4px; margin-top: 2px;
+  }
+  #snd-list[data-mode="code"] .snd-head { color: var(--code-deep); }
+  #snd-list[data-mode="code"] .snd-row { border-bottom-color: rgba(92, 127, 166, .16); }
+  /* 「跟随聊天窗口」这种占位值用虚边框，一眼看出不是真选了某一项 */
+  #snd-list[data-mode="code"] .dd.dd-follow .dd-trigger {
+    color: var(--code-deep); font-weight: 600; background: #fff;
+    border-style: dashed; border-color: rgba(92, 127, 166, .5);
   }
   .snd-row {
     padding: 8px 2px; border-bottom: 1px dashed var(--line-soft);
@@ -124,13 +172,8 @@
     padding: 2px 2px 6px; font-size: 13px; color: var(--ink-soft); font-weight: 600;
     font-family: "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
   }
-  /* Code 两列表头换个颜色，一眼分清普通窗口与代码窗口的配置 */
-  .snd-head .col-code { color: var(--accent-deep); }
-  .snd-head .col-style, .snd-head .col-sound, .snd-head .col-trigger, .snd-head .col-code { min-width: 0; }
+  .snd-head .col-style, .snd-head .col-sound, .snd-head .col-trigger { min-width: 0; }
   .snd-head .col-action { min-width: 128px; }
-  /* Code 那两列的下拉略矮一点，避免七个控件挤成一片 */
-  .snd-row .dd[data-kind="codeStyle"] .dd-trigger,
-  .snd-row .dd[data-kind="codeSound"] .dd-trigger { min-height: 34px; padding: 6px 8px; font-size: 13px; }
   .snd-actions { display: flex; gap: 6px; align-items: center; min-width: 0; }
   .snd-actions .mini { width: auto; flex: 1; min-width: 0; }
   .snd-row .dd-trigger {
@@ -213,9 +256,9 @@
     .snd-row .dd[data-kind="style"] { grid-column: 1; }
     .snd-row .dd[data-kind="trigger"] { grid-column: 2; }
     .snd-row .dd[data-kind="sound"] { grid-column: 1 / -1; }
-    .snd-row .dd[data-kind="codeStyle"] { grid-column: 1; }
-    .snd-row .dd[data-kind="codeSound"] { grid-column: 2; }
     .snd-row .snd-actions { grid-column: 1 / -1; justify-self: start; width: 100%; }
+    /* 窄屏时 Code 屏只有四列，两列排就够 */
+    #snd-list[data-mode="code"] .snd-row .dd[data-kind="codeSound"] { grid-column: 1 / -1; }
     .snd-row .snd-actions .mini { width: auto; }
   }
   .tip-line { font-size: 13.5px; color: var(--ink-soft); min-height: 20px; margin-top: 9px; font-family: "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif; }
@@ -638,8 +681,12 @@
 
   <div class="card">
     <h2>按助手个性化</h2>
-    <div class="hint" style="margin-bottom:8px">每个助手可以配不同的音效、通知风格和提醒时机。风格只改变标题语气和正文包装，正文永远显示助手原话，不改写不生成；音效用你放进来的音频文件；提醒时机只影响「聊天回复完成」，选「跟随全局」就用上面全局档位。</div>
-    <div class="hint" style="margin-bottom:8px">右边两列是 <b>Code 窗口</b>专用的文案和音效。Code 窗口弹出的提醒标题前面会带一个「〔Code〕」记号，一眼就能认出它是代码窗口那边收工了。两列默认都是「跟随普通模式」，不碰就和左边完全一样；想分开配就在这两列里选。</div>
+    <div class="hint" style="margin-bottom:10px">下面分两屏：<b>聊天窗口</b>是日常聊天用的那一套，<b>Code 窗口</b>是代码窗口跑完时用的那一套。点上面的按钮切，切到哪屏就在配哪屏，两屏颜色不一样，不会搞混。</div>
+    <div class="snd-mode-switch" id="snd-mode-switch">
+      <button type="button" data-mode="chat" aria-selected="true">聊天窗口</button>
+      <button type="button" data-mode="code" aria-selected="false">Code 窗口</button>
+    </div>
+    <div class="snd-mode-note" id="snd-mode-note"></div>
     <div class="hint" style="margin-bottom:8px">🎁 方言风格和「学我说话」<b>这一版暂时用不了</b>：它们原本靠表情包联动挂载，表情包换形态后路径对不上，所以风格列表里暂时不会出现这两类，以后修。其他风格照常。</div>
     <div class="snd-folder">
       <label class="snd-folder-label" for="in-snd-dir">音效文件夹</label>
@@ -1499,7 +1546,7 @@ function boot() {
   }
 
   // ── 按助手个性化（风格 + 音效） ──
-  var sndData = { files: [], agents: [], assignments: {}, styleAssignments: {}, triggerAssignments: {}, codeAssignments: {}, codeStyleAssignments: {}, styles: [] };
+  var sndData = { files: [], agents: [], assignments: {}, styleAssignments: {}, triggerAssignments: {}, codeAssignments: {}, codeStyleAssignments: {}, styles: [], agentsError: "" };
   var esc = function (s) {
     return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   };
@@ -1532,7 +1579,7 @@ function boot() {
 
   // Code 窗口的风格表：第一项是「跟随普通窗口」，选了就把该助手的单独设置删掉
   function codeStyleOptions(a) {
-    return buildStyleOptions(codeStyleVal(a) || "", '跟随普通模式');
+    return buildStyleOptions(codeStyleVal(a) || "", '跟随聊天窗口');
   }
 
   function buildStyleOptions(current, followLabel) {
@@ -1567,7 +1614,7 @@ function boot() {
   }
 
   function codeSoundOptions(a) {
-    return buildSoundOptions(codeSndVal(a) || "", '跟随普通模式');
+    return buildSoundOptions(codeSndVal(a) || "", '跟随聊天窗口');
   }
 
   function buildSoundOptions(current, followLabel) {
@@ -1585,6 +1632,134 @@ function boot() {
     return opts;
   }
 
+  // ── 两屏：聊天窗口 / Code 窗口 ──
+  // 原先想做一张宽表把两套并排，实际用了七个下拉挤一行，字全截成「古风…」「跟随普…」，
+  // 看不清等于没配。所以拆成两屏：上面一个切换按钮，切过去就换整套表格和配色。
+  var sndMode = "chat";
+
+  function sndModeNoteText() {
+    return sndMode === "code"
+      ? "<b>Code 窗口的提醒</b>：代码窗口跑完一轮时弹出的那条，标题前面会带「〔Code〕」记号，跟聊天窗口一眼分得开。默认全是「跟随聊天窗口」，只改这里不会动聊天那边；提醒时机跟聊天窗口保持一致。"
+      : "<b>聊天窗口的提醒</b>：伙伴在普通对话里回完一轮时弹出的那条。风格只改标题语气和正文包装，正文永远是伙伴原话；音效用你放进音效文件夹里的音频；提醒时机只影响「聊天回复完成」，选「跟随全局」就用上面的全局档位。";
+  }
+
+  // 「跟随聊天窗口」存的是空值，用虚边框标出来，让人知道那不是真选了某一项
+  function syncFollowMark(list) {
+    list.querySelectorAll('select[data-kind="codeStyle"], select[data-kind="codeSound"]').forEach(function (sel) {
+      var dd = sel.closest(".dd");
+      if (dd) dd.classList.toggle("dd-follow", sel.value === "");
+    });
+  }
+
+  function renderSndList() {
+    var list = document.getElementById("snd-list");
+    if (!list) return;
+    var note = document.getElementById("snd-mode-note");
+    var isCode = sndMode === "code";
+
+    if (!sndData.agents.length) {
+      list.removeAttribute("data-mode");
+      list.innerHTML = '<div class="empty">' + esc(sndData.agentsError || "没有找到助手") + "</div>";
+      if (note) note.style.display = "none";
+      return;
+    }
+    if (note) {
+      note.style.display = "";
+      note.setAttribute("data-mode", sndMode);
+      note.innerHTML = sndModeNoteText();
+    }
+    list.setAttribute("data-mode", sndMode);
+
+    var html = isCode
+      ? '<div class="snd-head"><span class="who"></span><span class="col-style">文案风格</span><span class="col-sound">音效</span><span class="col-action" aria-hidden="true"></span></div>'
+      : '<div class="snd-head"><span class="who"></span><span class="col-style">文案风格</span><span class="col-sound">音效</span><span class="col-trigger">提醒时机</span><span class="col-action" aria-hidden="true"></span></div>';
+
+    for (var i = 0; i < sndData.agents.length; i++) {
+      var a = sndData.agents[i];
+      var aid = esc(a.id);
+      html += '<div class="snd-row"><span class="who">' + esc(a.name) + "</span>";
+      if (isCode) {
+        html += '<select data-agent="' + aid + '" data-kind="codeStyle" title="代码窗口的提醒用哪套文案；跟随聊天窗口 = 和聊天那边一样">' + codeStyleOptions(a) + "</select>" +
+          '<select data-agent="' + aid + '" data-kind="codeSound" title="代码窗口的提醒用哪个音效；跟随聊天窗口 = 和聊天那边一样">' + codeSoundOptions(a) + "</select>" +
+          '<span class="snd-actions"><button class="mini" data-preview="' + aid + '" data-mode="code">试听</button></span>';
+      } else {
+        html += '<select data-agent="' + aid + '" data-kind="style">' + styleOptions(a) + "</select>" +
+          '<select data-agent="' + aid + '" data-kind="sound">' + sndOptions(a) + "</select>" +
+          '<select data-agent="' + aid + '" data-kind="trigger" title="聊天回复完成按这个档位提醒；跟随全局=用上面全局档位">' + triggerOptions(a) + "</select>" +
+          '<span class="snd-actions"><button class="mini" data-preview="' + aid + '" data-mode="normal">试听</button></span>';
+      }
+      html += "</div>";
+    }
+    list.innerHTML = html;
+
+    list.querySelectorAll("select").forEach(function (sel) { beautifySelect(sel); });
+    syncFollowMark(list);
+
+    list.querySelectorAll("select").forEach(function (sel) {
+      sel.addEventListener("change", function () {
+        var kind = sel.dataset.kind;
+        var isCodeSel = kind === "codeStyle" || kind === "codeSound";
+        var path = kind === "style" || kind === "codeStyle"
+          ? "/api/agents/style"
+          : kind === "trigger"
+            ? "/api/agents/trigger"
+            : "/api/sounds/assign";
+        api(path, {
+          method: "POST",
+          body: JSON.stringify({ agentId: sel.dataset.agent, value: sel.value, mode: isCodeSel ? "code" : "normal" })
+        }).then(function (rr) {
+          if (rr.ok && kind === "style") sndData.styleAssignments = rr.assignments || {};
+          if (rr.ok && kind === "sound") sndData.assignments = rr.assignments || {};
+          if (rr.ok && kind === "trigger") sndData.triggerAssignments = rr.assignments || {};
+          if (rr.ok && kind === "codeStyle") sndData.codeStyleAssignments = rr.assignments || {};
+          if (rr.ok && kind === "codeSound") sndData.codeAssignments = rr.assignments || {};
+          syncFollowMark(list);
+          showTip("snd-tip", rr.ok ? "已保存 ✓" : "保存失败：" + (rr.error || "未知原因"), rr.ok ? 1500 : 3000);
+        }).catch(function () { showTip("snd-tip", "保存失败", 3000); });
+      });
+    });
+
+    list.querySelectorAll("[data-preview]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var aid = btn.dataset.preview;
+        var wantCode = btn.dataset.mode === "code";
+        // 所见即所得：直接读下拉当前选中值（不等保存时序），没有对应控件才回退已保存配置
+        var styleSel = list.querySelector('select[data-kind="' + (wantCode ? "codeStyle" : "style") + '"][data-agent="' + aid + '"]');
+        var soundSel = list.querySelector('select[data-kind="' + (wantCode ? "codeSound" : "sound") + '"][data-agent="' + aid + '"]');
+        var fallbackStyle = wantCode
+          ? (sndData.codeStyleAssignments[aid] || sndData.styleAssignments[aid] || "default")
+          : (sndData.styleAssignments[aid] || "default");
+        var fallbackSound = wantCode
+          ? (sndData.codeAssignments[aid] || sndData.assignments[aid] || "default")
+          : (sndData.assignments[aid] || "default");
+        var styleValue = styleSel && styleSel.value ? styleSel.value : fallbackStyle;
+        var value = soundSel && soundSel.value ? soundSel.value : fallbackSound;
+        api("/api/sound/preview", {
+          method: "POST",
+          body: JSON.stringify({ agentId: aid, file: value === "default" ? "" : value, style: styleValue, mode: wantCode ? "code" : "normal" })
+        }).then(function (rr) {
+          showTip("snd-tip", rr.sent ? "提醒已提交，留意弹窗和提示音" : "发送失败", 2500);
+        }).catch(function () { showTip("snd-tip", "请求失败", 3000); });
+      });
+    });
+  }
+
+  (function bindSndModeSwitch() {
+    var box = document.getElementById("snd-mode-switch");
+    if (!box) return;
+    box.querySelectorAll("button").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var next = btn.dataset.mode === "code" ? "code" : "chat";
+        if (next === sndMode) return;
+        sndMode = next;
+        box.querySelectorAll("button").forEach(function (b) {
+          b.setAttribute("aria-selected", b.dataset.mode === next ? "true" : "false");
+        });
+        renderSndList();
+      });
+    });
+  })();
+
   function loadSounds() {
     api("/api/sounds")
       .then(function (r) {
@@ -1597,86 +1772,15 @@ function boot() {
           codeAssignments: r.codeAssignments || {},
           codeStyleAssignments: r.codeStyleAssignments || {},
           styles: r.styles || [],
-          hiddenAgents: r.hiddenAgents || []
+          hiddenAgents: r.hiddenAgents || [],
+          agentsError: r.agentsError || ""
         };
         if (r.soundError) showTip("snd-tip", r.soundError, 6000);
         var dirIn = document.getElementById("in-snd-dir");
         if (dirIn) dirIn.value = r.customDir || "";
         var list = document.getElementById("snd-list");
         if (!list) return;
-        if (r.agentsError) {
-          list.innerHTML = '<div class="empty">' + esc(r.agentsError) + '</div>';
-          return;
-        }
-        if (sndData.agents.length === 0) {
-          list.innerHTML = '<div class="empty">没有找到助手</div>';
-          return;
-        }
-        var html = '<div class="snd-head"><span class="who"></span><span class="col-style">文案风格</span><span class="col-sound">音效</span><span class="col-code">Code 文案</span><span class="col-code">Code 音效</span><span class="col-trigger">提醒时机</span><span class="col-action" aria-hidden="true"></span></div>';
-        for (var i = 0; i < sndData.agents.length; i++) {
-          var a = sndData.agents[i];
-          html += '<div class="snd-row"><span class="who">' + esc(a.name) + "</span>" +
-            '<select data-agent="' + esc(a.id) + '" data-kind="style">' + styleOptions(a) + "</select>" +
-            '<select data-agent="' + esc(a.id) + '" data-kind="sound">' + sndOptions(a) + "</select>" +
-            '<select data-agent="' + esc(a.id) + '" data-kind="codeStyle" title="代码窗口里的提醒用哪套文案；跟随普通模式 = 和左边一样">' + codeStyleOptions(a) + "</select>" +
-            '<select data-agent="' + esc(a.id) + '" data-kind="codeSound" title="代码窗口里的提醒用哪个音效；跟随普通模式 = 和左边一样">' + codeSoundOptions(a) + "</select>" +
-            '<select data-agent="' + esc(a.id) + '" data-kind="trigger" title="聊天回复完成按这个档位提醒；跟随全局=用上面全局档位">' + triggerOptions(a) + "</select>" +
-            '<span class="snd-actions"><button class="mini" data-preview="' + esc(a.id) + '" data-mode="normal">试听</button>' +
-            '<button class="mini" data-preview="' + esc(a.id) + '" data-mode="code">Code</button></span></div>';
-        }
-        list.innerHTML = html;
-        list.querySelectorAll("select").forEach(function (sel) { beautifySelect(sel); });
-        list.querySelectorAll("select").forEach(function (sel) {
-          sel.addEventListener("change", function () {
-            var kind = sel.dataset.kind;
-            var isCode = kind === "codeStyle" || kind === "codeSound";
-            var path = kind === "style" || kind === "codeStyle"
-              ? "/api/agents/style"
-              : kind === "trigger"
-                ? "/api/agents/trigger"
-                : "/api/sounds/assign";
-            api(path, {
-              method: "POST",
-              body: JSON.stringify({
-                agentId: sel.dataset.agent,
-                value: sel.value,
-                mode: isCode ? "code" : "normal"
-              })
-            }).then(function (rr) {
-              if (rr.ok && kind === "style") sndData.styleAssignments = rr.assignments || {};
-              if (rr.ok && kind === "sound") sndData.assignments = rr.assignments || {};
-              if (rr.ok && kind === "trigger") sndData.triggerAssignments = rr.assignments || {};
-              if (rr.ok && kind === "codeStyle") sndData.codeStyleAssignments = rr.assignments || {};
-              if (rr.ok && kind === "codeSound") sndData.codeAssignments = rr.assignments || {};
-              showTip("snd-tip", rr.ok ? "已保存 ✓" : "保存失败：" + (rr.error || "未知原因"), rr.ok ? 1500 : 3000);
-            }).catch(function () { showTip("snd-tip", "保存失败", 3000); });
-          });
-        });
-        list.querySelectorAll("[data-preview]").forEach(function (btn) {
-          btn.addEventListener("click", function () {
-            var aid = btn.dataset.preview;
-            var wantCode = btn.dataset.mode === "code";
-            // 所见即所得：直接读下拉控件当前选中值（不等保存时序），没有对应控件才回退已保存配置
-            var styleKind = wantCode ? "codeStyle" : "style";
-            var soundKind = wantCode ? "codeSound" : "sound";
-            var styleSel = list.querySelector('select[data-kind="' + styleKind + '"][data-agent="' + aid + '"]');
-            var soundSel = list.querySelector('select[data-kind="' + soundKind + '"][data-agent="' + aid + '"]');
-            var fallbackStyle = wantCode
-              ? (sndData.codeStyleAssignments[aid] || sndData.styleAssignments[aid] || "default")
-              : (sndData.styleAssignments[aid] || "default");
-            var fallbackSound = wantCode
-              ? (sndData.codeAssignments[aid] || sndData.assignments[aid] || "default")
-              : (sndData.assignments[aid] || "default");
-            var styleValue = styleSel && styleSel.value ? styleSel.value : fallbackStyle;
-            var value = soundSel && soundSel.value ? soundSel.value : fallbackSound;
-            api("/api/sound/preview", {
-              method: "POST",
-              body: JSON.stringify({ agentId: aid, file: value === "default" ? "" : value, style: styleValue, mode: wantCode ? "code" : "normal" })
-            }).then(function (rr) {
-              showTip("snd-tip", rr.sent ? "提醒已提交，留意弹窗和提示音" : "发送失败", 2500);
-            }).catch(function () { showTip("snd-tip", "请求失败", 3000); });
-          });
-        });
+        renderSndList();
         // 隐藏助手：从列表移除（数据保留，恢复入口在「管理隐藏助手」）
         // （v0.4.22 起隐藏管理收敛到「管理助手」弹层勾选，行内不再有隐藏按钮）
       })
