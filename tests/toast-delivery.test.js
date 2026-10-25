@@ -76,6 +76,33 @@ test('脚本已提交后不重复发送备用通知', async () => {
   assert.deepEqual(result, { sent: true, via: 'powershell' });
 });
 
+test('超时重试一次，第二次拿到提交标记就算成功', async () => {
+  let attempts = 0;
+  const notes = [];
+  const spawnProcess = () => {
+    attempts += 1;
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.kill = () => child.emit('close', null, 'SIGTERM');
+    // 第一轮不吐标记也不退出，等超时上限把它砍掉；第二轮才正常提交。
+    if (attempts === 2) queueMicrotask(() => { child.stdout.write('TXS_TOAST_SUBMITTED\n'); child.emit('close', 0); });
+    return child;
+  };
+  assert.equal(await sendToast(options, { spawnProcess, timeoutMs: 5, debug: (line) => notes.push(line) }), true);
+  assert.equal(attempts, 2);
+  assert.match(notes.join('\n'), /超时/);
+});
+
+test('脚本明确报错时不重试，直接交给备用通道', async () => {
+  let attempts = 0;
+  const fake = fakeProcess((child) => { child.stderr.write('DisabledForApplication'); child.emit('close', 1); });
+  const spawnProcess = (...args) => { attempts += 1; return fake.dependencies.spawnProcess(...args); };
+  const result = await deliverToast(options, async () => ({ shown: true }), { ...fake.dependencies, spawnProcess, timeoutMs: 50 });
+  assert.equal(attempts, 1);
+  assert.deepEqual(result, { sent: true, via: 'host' });
+});
+
 test('两个通道均失败时准确返回失败', async () => {
   const fake = fakeProcess((child) => child.emit('close', 1));
   const result = await deliverToast(options, async () => { throw new Error('permission denied'); }, fake.dependencies);

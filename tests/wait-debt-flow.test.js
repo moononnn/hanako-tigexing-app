@@ -171,7 +171,7 @@ test("叫醒投递失败：不补 turn_start，欠账不能把窗口永久压死
       const text = `${notified[0].title || ""} ${notified[0].body || ""}`;
       assert.match(text, /后来的消息/);
       assert.doesNotMatch(text, /过程句/, "兵底放行不补发旧回合，只弹当前这条");
-      assert.match(text, /这版可能还会变/);
+      assert.match(text, /等太久了/);
     },
     { waitDebtTtlMs: 30 }
   );
@@ -217,7 +217,7 @@ test("兜底：叫醒迟迟不投递也不能把窗口压死，超时后带实�
       const text = `${notified[0].title || ""} ${notified[0].body || ""}`;
       assert.match(text, /后来的消息/);
       assert.doesNotMatch(text, /过程句/);
-      assert.match(text, /这版可能还会变/, "兜底放行要说清实情");
+      assert.match(text, /等太久了/, "兜底放行要说清是等太久才放行");
       assert.doesNotMatch(notified[0].title || "", /这版可能还会变/, "提示只进正文，不进标题");
     },
     { waitDebtTtlMs: 30 }

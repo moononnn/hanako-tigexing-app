@@ -120,6 +120,23 @@ async function withHarness(fn, preferences = {}) {
   }
 }
 
+test("后台任务还在跑时，空返回不抢着提醒", async () => {
+  await withHarness(async ({ send, notified }) => {
+    send(backgroundTask("upsert", "child-a"));
+    send(turnEnd(""));
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    assert.equal(notified.length, 0, "假回合：还有后台任务在跑，后面一定还会起真回合");
+
+    // 任务收工后真回合说了话，正常提醒，不带异常文案
+    send(backgroundTask("remove", "child-a"));
+    send(turnEnd("这才是真结果"));
+    assert.equal(await waitFor(() => notified.length > 0), true);
+    const text = `${notified[0].title || ""} ${notified[0].body || ""}`;
+    assert.match(text, /这才是真结果/);
+    assert.doesNotMatch(text, /没出声/);
+  });
+});
+
 test("对照：没有后台任务时，完成回合照常提醒", async () => {
   await withHarness(async ({ send, notified }) => {
     send(turnEnd("先把活干完了"));
@@ -134,14 +151,29 @@ test("对照：没有后台任务时，完成回合照常提醒", async () => {
 test("空内容的完成事件不冒充正常回复提醒，后续有正文时仍正常提醒", async () => {
   await withHarness(async ({ send, notified }) => {
     send(turnEnd(""));
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    assert.equal(notified.length, 0, "空内容回合没有可提醒的回复正文");
+    // 空返回现在会走异常提醒（一条「这轮没出声」），不再是完全静音；
+    // 它仍然不能冒充「伙伴回你啦」那种完成提醒。
+    const alerted = await waitFor(() => notified.length > 0, 6000);
+    assert.equal(alerted, true, "空返回应当有一条异常提醒，不能两边一起哑掉");
+    assert.equal(notified.length, 1, "同一轮只提醒一次");
+    const firstText = `${notified[0].title || ""} ${notified[0].body || ""}`;
+    assert.match(firstText, /没出声/, "文案要说清是没出声，不是报错");
+    assert.doesNotMatch(firstText, /回你啦/, "不能冒充正常完成");
 
+    notified.length = 0;
     send(turnEnd("这是实际回复"));
     assert.equal(await waitFor(() => notified.length > 0), true, "后续真实正文仍应正常提醒");
     assert.equal(notified.length, 1);
     assert.match(String(notified[0].body || ""), /这是实际回复/);
   });
+});
+
+test("空返回的异常提醒在断联开关关闭时不弹", async () => {
+  await withHarness(async ({ send, notified }) => {
+    send(turnEnd(""));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(notified.length, 0, "关掉断联提醒后，空返回也不该弹");
+  }, { abnormalEnabled: false });
 });
 
 test("后台任务在跑时不弹；收齐后补发被压下的那一条", async () => {
@@ -318,7 +350,7 @@ test("补发：正常收齐后补发的通知不带兜底提示", async () => {
 
     assert.equal(await waitFor(() => notified.length > 0), true, "收齐后应补发");
     const text = `${notified[0].title || ""} ${notified[0].body || ""}`;
-    assert.doesNotMatch(text, /这版可能还会变/, "正常收齐的补发不是兵底放行，不该带这句提示");
+    assert.doesNotMatch(text, /等太久了/, "正常收齐的补发不是兜底放行，不该带这句提示");
   });
 });
 
@@ -352,7 +384,7 @@ test("兜底：结束通知丢失后，下一个回合照常提醒且正文带�
     send(turnEnd("这是后来的消息"));
     assert.equal(await waitFor(() => seen.notified.length > 0), true, "兵底释放后应正常提醒");
     assert.equal(seen.notified.length, 1, "只弹这一条");
-    assert.match(String(seen.notified[0].body || ""), /这版可能还会变/, "正文应说明这版可能还会变");
+    assert.match(String(seen.notified[0].body || ""), /等太久了/, "正文应说明是等太久才放行");
     const text = `${seen.notified[0].title || ""} ${seen.notified[0].body || ""}`;
     assert.doesNotMatch(seen.notified[0].title || "", /这版可能还会变/, "提示只进正文，不进标题");
   } finally {

@@ -3,6 +3,23 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildAbnormalCopy, failureReasonLabel, isRetryCancelled } from "../lib/abnormal-copy.js";
 
+test("异常文案：空返回不说成出错，也不给假错误码", () => {
+  const copy = buildAbnormalCopy({ silent: true, agentName: "小花", sessionTitle: "悬浮球改成表情包开关" });
+  assert.match(copy.title, /这轮没出声/);
+  assert.match(copy.body, /没生成出回复/);
+  assert.match(copy.body, /继续/);
+  assert.doesNotMatch(copy.body, /模型返回：/, "没有错误原文就不该编一个");
+  assert.doesNotMatch(copy.body, /模型请求没完成/, "空返回不是请求没完成");
+  assert.equal(copy.refined, false, "空返回没有原文可供润色");
+});
+
+test("异常文案：真的报错时仍然走错误那套，不被空返回搅混", () => {
+  const copy = buildAbnormalCopy({ errorMessage: "fetch failed" });
+  assert.match(copy.title, /这轮没接上/);
+  assert.match(copy.body, /连接中断或超时/);
+  assert.doesNotMatch(copy.body, /没出声/);
+});
+
 test("异常文案：连接错误归纳成大白话", () => {
   assert.equal(failureReasonLabel("WebSocket error"), "模型连接中断或超时");
   assert.equal(failureReasonLabel("fetch failed"), "模型连接中断或超时");

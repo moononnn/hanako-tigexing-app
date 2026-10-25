@@ -17,6 +17,7 @@ import { deliverToast } from './lib/toast.js';
 import {
   parseTurnEnd,
   parseTurnFailure,
+  parseSilentTurn,
   parseProviderError,
   parseSessionAbort,
   parseAutoRetryStart,
@@ -201,7 +202,7 @@ export async function apply(ctx) {
   async function deliverNotification({ title, body, icon, sound, duration, style }) {
     return deliverToast({
       pluginDir: INSTALL_DIR, title, message: body, style, icon, sound, duration, log
-    }, (input) => ctx.notifications.show(input), toastDependencies.dependencies);
+    }, (input) => ctx.notifications.show(input), { ...toastDependencies.dependencies, debug: dbg });
   }
   async function notify(options) {
     return (await deliverNotification(options)).via;
@@ -374,6 +375,12 @@ export async function apply(ctx) {
       dbg(`异常提醒跳过：静默时段 session=${sessionId}`);
       return;
     }
+    // 空返回的判定会先等一段宽限期；要是这期间后台任务或叫醒又欠上了，
+    // 说明后面还有真回合要说，这条提醒就过时了，不能弹。
+    if (alert?.silent === true && (backgroundTasks.has(sessionId) || waitDebt.has(sessionId))) {
+      dbg(`空返回提醒已过时（后台任务/叫醒未结） session=${sessionId}`);
+      return;
+    }
 
     const reason = [alert.errorMessage, alert.finalError, alert.reason]
       .map((value) => String(value || '').trim())
@@ -382,7 +389,10 @@ export async function apply(ctx) {
     const copy = buildAbnormalCopy({
       agentName: name,
       partialText: alert.text,
-      errorMessage: reason
+      errorMessage: reason,
+      // 空返回不是错误，不能套「模型返回：xxx」那套文案。
+      // 但有真错误原文时以错误为准，别用一个笼统的「没出声」盖掉具体原因。
+      silent: alert.silent === true && !reason
     });
     dbg(`异常提醒候选 session=${sessionId} source=${alert.source || 'unknown'} reason=${copy.body}`);
     await doToast({
@@ -610,9 +620,11 @@ export async function apply(ctx) {
         agentName: agentName(agentId),
         text,
         sessionPath: info.sessionPath,
-        // 兵底放行的回合不一定是最终结果（后台任务可能还在跑，也可能没收到它的完成通知），
-        // 正文前加一句短提示。刻意写短：横幅只有两行，后面还得留位置给伙伴原话。
-        notice: releasedByTimeout ? '（这版可能还会变）' : ''
+        // 兵底放行的回合不一定是最终结果（后台任务可能还在跑，也可能没收到它的完成通知）。
+        // 只说自己的处境，不猜事实：提个醒能确定的只有「本来在等、等超时了」，
+        // 那活儿是真在跑还是早干完了它无从得知，一个字都不替它断言。
+        // 也不加括号，免得被当成伙伴自己的口头禅。排在正文末尾，正文让字数（见 notification-copy）。
+        notice: releasedByTimeout ? '等太久了，先叫你一声' : ''
       },
       now
     );
@@ -798,6 +810,19 @@ export async function apply(ctx) {
           } else {
             abnormalTurns.onTurnFailure(failure);
           }
+          return;
+        }
+        // 正常收尾但一个字没说：不归「完成提醒」也不归「失败」，单独算一次异常候选。
+        // （2026-10-17 实机：MiniMax 思考吃完额度后返回 content=[] + stopReason=stop，
+        //   完成提醒当它是空内容静默跳过，失败判据又够不着，两边一起哑掉。）
+        const silent = parseSilentTurn(event, sessionPath);
+        if (silent) {
+          // 后台任务还压着、或叫醒还没投递：后面一定还会起真回合，别抢着弹。
+          if (backgroundTasks.has(silent.sessionId) || waitDebt.has(silent.sessionId)) {
+            dbg(`空返回但后台任务或叫醒未结，先不提醒 session=${silent.sessionId}`);
+            return;
+          }
+          abnormalTurns.onTurnFailure(silent);
           return;
         }
         if (shouldNotifyCompletedTurn(info)) abnormalTurns.onTurnSuccess(info.sessionId);

@@ -8,6 +8,9 @@ $ErrorActionPreference = "Stop"
 $AUMID = "TiGeXingApp.Desktop"
 $lnk = Join-Path ([Environment]::GetFolderPath("ApplicationData")) "Microsoft\Windows\Start Menu\Programs\TiGeXingApp.lnk"
 $regPath = "HKCU:\SOFTWARE\Classes\AppUserModelId\$AUMID"
+# 真实图标在 assets/ 下。lib/ 里从来没有过 app-icon.png，旧版注册表里那条
+# D 盘死路径就是回退到不存在的文件留下的，通知中心只能显示默认图标。
+$appIcon = Join-Path (Split-Path $PSScriptRoot -Parent) "assets\icon.png"
 
 # ── 首次注册：快捷方式 + 注册表显示名（已注册则跳过） ──
 if (-not (Test-Path $lnk) -or -not (Test-Path $regPath)) {
@@ -125,16 +128,22 @@ public static class TxsLnk
         $shell = New-Object -ComObject WScript.Shell
         $sc = $shell.CreateShortcut($lnk)
         $sc.TargetPath = $pyw
-        $sc.IconLocation = "$([Environment]::GetFolderPath("Windows"))\System32\shell32.dll,15"
+        $sc.IconLocation = if (Test-Path $appIcon) { "$appIcon,0" } else { "$([Environment]::GetFolderPath("Windows"))\System32\shell32.dll,15" }
         $sc.Description = "提个醒"
         $sc.Save()
         [TxsLnk]::SetAppUserModelID($lnk, $AUMID)
     }
+}
 
-    # 注册表显示名与图标（新版 Win11 优先读这里，而不是快捷方式文件名）
-    if (-not (Test-Path $regPath)) { New-Item -Path $regPath -Force | Out-Null }
-    New-ItemProperty -Path $regPath -Name "DisplayName" -Value "提个醒" -PropertyType String -Force | Out-Null
-    New-ItemProperty -Path $regPath -Name "IconUri" -Value "$PSScriptRoot\app-icon.png" -PropertyType String -Force | Out-Null
+# 注册表显示名与图标（新版 Win11 优先读这里，而不是快捷方式文件名）。
+# 每次运行都重写：装过目录搬家、换机器以后，旧的 IconUri 会一直指向
+# 不存在的文件，而整个首次注册块此时已经不会再进，只能在这里自己校正。
+if (-not (Test-Path $regPath)) { New-Item -Path $regPath -Force | Out-Null }
+New-ItemProperty -Path $regPath -Name "DisplayName" -Value "提个醒" -PropertyType String -Force | Out-Null
+if (Test-Path $appIcon) {
+    New-ItemProperty -Path $regPath -Name "IconUri" -Value $appIcon -PropertyType String -Force | Out-Null
+} else {
+    Remove-ItemProperty -Path $regPath -Name "IconUri" -ErrorAction SilentlyContinue
 }
 
 # ── 发送 toast ──
@@ -153,7 +162,7 @@ $img = ""
 if ($st -ne "plain") {
     $icon = [Environment]::GetEnvironmentVariable("TXS_ICON", "Process")
     if (-not $icon -or -not (Test-Path $icon)) {
-        $icon = Join-Path $PSScriptRoot "app-icon.png"
+        $icon = $appIcon
     }
     if (Test-Path $icon) {
         $iconUri = "file:///" + ($icon -replace '\\', '/')

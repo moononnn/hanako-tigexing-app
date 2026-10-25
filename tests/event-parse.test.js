@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   parseTurnEnd,
   parseTurnFailure,
+  parseSilentTurn,
   parseProviderError,
   parseSessionAbort,
   isUserInitiatedAbortReason,
@@ -255,6 +256,66 @@ test("异常事件：从 sessionPath 推导助手和会话", () => {
 test("异常事件：正常 stop 和工具中间轮不进入失败解析", () => {
   assert.equal(parseTurnFailure({ type: "turn_end", message: { stopReason: "stop", content: [] } }, sessionPath), null);
   assert.equal(parseTurnFailure({ type: "turn_end", message: { stopReason: "toolUse", content: [] } }, sessionPath), null);
+});
+
+// ── 静默收尾（2026-10-17 实机：MiniMax 跑完但一个字没吐）──
+// 这类回合 stopReason=stop、content=[]、没有工具调用，完成提醒当它「没内容」跳过，
+// 失败判据又只认 error/未成功/中断，于是两边一起哑掉，用户完全不知道发生过什么。
+
+test("静默收尾：最终回合无正文无工具调用，识别为异常候选", () => {
+  const r = parseSilentTurn({
+    type: "turn_end",
+    agentId: "hanako",
+    message: { role: "assistant", content: [], stopReason: "stop" }
+  }, sessionPath);
+  assert.ok(r, "空返回应该被认出来");
+  assert.equal(r.silent, true);
+  assert.equal(r.sessionId, "turn-1");
+  assert.equal(r.agentId, "hanako");
+  assert.equal(r.errorMessage, "", "它不是报错，不该编一个错误原因");
+});
+
+test("静默收尾：只有空白文字也算没说", () => {
+  const r = parseSilentTurn({
+    type: "turn_end",
+    message: { content: [{ type: "text", text: "   \n  " }], stopReason: "stop" }
+  }, sessionPath);
+  assert.equal(r?.silent, true);
+});
+
+test("静默收尾：说了话、调了工具、或标准失败都不算", () => {
+  // 说了话 = 正常回合
+  assert.equal(parseSilentTurn({
+    type: "turn_end",
+    message: { content: [{ type: "text", text: "说完了" }], stopReason: "stop" }
+  }, sessionPath), null);
+  // 调了工具 = 还能接着干，不是收尾
+  assert.equal(parseSilentTurn({
+    type: "turn_end",
+    message: { content: [{ type: "toolCall", name: "read" }], stopReason: "toolUse" }
+  }, sessionPath), null);
+  // 只有工具调用、还没 stop：仍是工具循环中间轮
+  assert.equal(parseSilentTurn({
+    type: "turn_end",
+    message: { content: [{ type: "toolCall", name: "read" }] }
+  }, sessionPath), null);
+  // 标准失败有自己的路，别在这里重复认领
+  assert.equal(parseSilentTurn({
+    type: "turn_end",
+    message: { content: [], stopReason: "error", errorMessage: "fetch failed" }
+  }, sessionPath), null);
+  assert.equal(parseSilentTurn({ type: "turn_end", wasSuccessful: false, message: { content: [] } }, sessionPath), null);
+});
+
+test("静默收尾：用户主动打断、截断、非 turn_end 都不算", () => {
+  assert.equal(parseSilentTurn({ type: "turn_end", aborted: true, reason: "abort", message: { content: [] } }, sessionPath), null);
+  // 输出被长度截断：stopReason=length 不是收尾
+  assert.equal(parseSilentTurn({
+    type: "turn_end",
+    message: { content: [], stopReason: "length" }
+  }, sessionPath), null);
+  assert.equal(parseSilentTurn({ type: "message", message: { content: [] } }, sessionPath), null);
+  assert.equal(parseSilentTurn(null, sessionPath), null);
 });
 
 test("异常事件：兼容 event 顶层 stopReason", () => {

@@ -64,3 +64,41 @@ test("格式型风格不参与润色", async () => {
   assert.equal(calls, 0);
   assert.equal(result.refined, false);
 });
+
+const NOTICE = "等太久了，先叫你一声";
+
+test("兜底提示排在正文末尾，不盖住伙伴的话", async () => {
+  const result = await buildNotificationCopy({
+    ...base,
+    enabled: false,
+    notice: NOTICE
+  });
+  assert.ok(result.body.endsWith(NOTICE), "提示必须在末尾");
+  assert.equal(result.body.slice(-NOTICE.length - 1, -NOTICE.length), " ", "提示前留一个空格，不粘在原话上");
+  assert.ok(!result.body.startsWith(NOTICE), "不能回到正文最前");
+});
+
+test("带提示时正文让出字数，总长仍装得下横幅两行", async () => {
+  const result = await buildNotificationCopy({
+    ...base,
+    enabled: false,
+    snippet: "开关显示不再犯迷糊，配置没动，21项测试全过啦",
+    notice: NOTICE
+  });
+  assert.ok(result.body.length <= 30, `总长不该被撑爆：${result.body}`);
+  assert.ok(result.body.endsWith(NOTICE), "让字数也不能把提示挤掉");
+  assert.match(result.body, /…/, "正文过长要截断并留省略号");
+});
+
+test("提示同样追加到润色后的正文末尾", async () => {
+  const result = await buildNotificationCopy({
+    ...base,
+    enabled: true,
+    notice: NOTICE,
+    modelConfig: {
+      async sample() { return '{"title":"小花把提醒修好啦","body":"设置现在能正常保存啦，界面也不犯迷糊了"}'; }
+    }
+  });
+  assert.equal(result.refined, true);
+  assert.ok(result.body.endsWith(NOTICE), "润色路径也要追加到末尾");
+});

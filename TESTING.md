@@ -2,6 +2,13 @@
 
 当前发布候选：`0.1.1`（2026-10-13；仅修复版本）
 
+## 通知主腿可靠性与图标校正（2026-10-18，本地开发）
+
+- 定向命令：`node --test tests/toast-delivery.test.js tests/toast-duration.test.js tests/app-smoke.test.js tests/focus-notify.test.js tests/external-notify.test.js tests/debug-log.test.js`，**48/48 通过**。新增两条覆盖：超时重试一次后拿到标记即算成功、脚本明确报错不重试直接降级。
+- `node --check lib/toast.js index.js` 通过；`lib/notify.ps1` 实机跑通（443ms，回 TXS_TOAST_SUBMITTED），并确认注册表 IconUri 已从不存在的旧安装路径校正为当前 `assets/icon.png`。
+- 未跑全量；未调用真实模型或外部 API。真实机器繁忙场景下的 45 秒上限是否足够，需要等下次实况再验。
+- 宿主备用通道**注定没有伙伴头像**：`AppNotificationInput` 契约只有 title/body，不接受 icon。这次只能降低走它的概率，不能消除。
+
 ## 拾光记专注通知联动（2026-10-14，本地开发）
 
 - 定向命令：`node --test --test-reporter=tap tests/focus-notify.test.js tests/external-notify.test.js tests/notification-copy.test.js tests/app-smoke.test.js`，**30/30 通过**。覆盖伙伴风格与主伙伴回退、实际陪读者姓名、独立专注通用通知、静默、并发幂等、调用方白名单、服务与 capability 声明。
@@ -43,7 +50,7 @@ node "<HANA_HOME>\artifacts\server\<宿主版本>\scripts\validate-app.mjs" --di
 ## 测试覆盖什么
 
 - **事件解析**：回合结束、中断回合、用户主动打断后重发、后台任务开始与结束、会话生命周期事件。
-- **模型异常提醒**：provider error / 失败回合 / 重试开始与耗尽接线、失败去重、额度与 Token Plan 原因识别、未知原因脱敏、手动停止不误报、断联独立开关。
+- **模型异常提醒**：provider error / 失败回合 / 重试开始与耗尽接线、失败去重、额度与 Token Plan 原因识别、未知原因脱敏、手动停止不误报、断联独立开关、**静默收尾（正常 stop 但无正文无工具调用）单独认作异常候选**。
 - **后台任务门与补发**：子agent 运行时压住完成提醒、收齐后补发且只补最后一条、没压下就不补；漏掉 remove 时按 TTL 兑底释放、长任务靠新事件续命、会话关闭清账。
 - **补发静默期**：收齐后不立即弹，先静默一段时间；静默期内窗口又开工则补发作废（暂存一并丢弃，不补发也不堆内存）；会话关闭取消排期。已知残留两条用测试写实：补发取消后新回合被打断则一条都不弹；开工晚于静默期会先弹一条已被取代的过程句。
 - **提醒策略**：四档聊天提醒时机、按伙伴单独设的档位、静默时段（含跨午夜）、合并窗口与补弹、隐藏名单。
@@ -61,7 +68,8 @@ node "<HANA_HOME>\artifacts\server\<宿主版本>\scripts\validate-app.mjs" --di
 
 ## 本版测试状态
 
-- 本版全量自动测试：**423/423 通过**（`node --test`，2026-10-13；新增空内容完成事件端到端回归：空内容不通知，后续非空回复仍正常提醒）。
+- 2026-10-17 静默收尾定向测试：**相关 138/138 通过**（`node --test tests/event-parse.test.js tests/abnormal-copy.test.js tests/abnormal-state.test.js tests/deferred-notify-flow.test.js tests/policy.test.js tests/app-smoke.test.js` 107 条 + `tests/wait-debt-flow.test.js tests/background-tasks.test.js tests/deferred-turns.test.js` 22 条 + `tests/toast-delivery.test.js` 9 条）。未跑全量、未跑真实付费模型。新增：空返回解析的四组边界（说话/调工具/标准失败/主动打断/长度截断均不误杀）、「这轮没出声」文案不编错误码、端到端空回合提醒只弹一次且不冒充正常完成、断联开关关闭时不弹、后台任务压着时不抢弹。
+- 本版全量自动测试：**423/423 通过**（`node --test`，2026-10-13；新增空内容完成事件端到端回归：空内容不通知，后续非空回复仍正常提醒）。注意：该条的空内容语义已被 2026-10-17 修正——空返回现在会弹一条异常提醒，不再完全静音。
 - 上一版 v0.0.21 全量自动测试：**415/415 通过**（发布预检记录）。
 - 本次模型异常提醒相关定向测试：**63/63 通过**（`node --test tests/abnormal-copy.test.js tests/abnormal-state.test.js tests/event-parse.test.js tests/deferred-notify-flow.test.js tests/app-smoke.test.js`；包含 Token Plan 402/2067 原因、五小时额度识别、未知原因脱敏、失败提醒、重试耗尽、开关关闭、手动停止过滤和入口装载）。未调用真实付费模型。
 - 模拟实机路径：用临时数据目录注入合成 402 provider error，经过当前 `apply()`、生产 `sendToast` 与 `notify.ps1`；日志记录 `kind=failure via=powershell`，无宿主备用通道，Windows 已接受提交，横幅可见性经截图确认。测试静音，未触碰正式偏好，也未调用真实模型/API。
