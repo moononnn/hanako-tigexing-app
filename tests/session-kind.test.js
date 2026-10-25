@@ -115,8 +115,8 @@ test("Code 窗口的风格音效：配了用自己的，没配跟随普通", () 
   assert.equal(pickSoundId({ inCode: true, agentId: "hanako", codeSounds, sounds }), "b.wav");
 
   // 没配 → 跟普通一样
-  assert.equal(pickStyleId({ inCode: true, agentId: "yumi", codeStyles, styles }), "default");
-  assert.equal(pickSoundId({ inCode: true, agentId: "yumi", codeSounds, sounds }), "default");
+  assert.equal(pickStyleId({ inCode: true, agentId: "agent_b", codeStyles, styles }), "default");
+  assert.equal(pickSoundId({ inCode: true, agentId: "agent_b", codeSounds, sounds }), "default");
 
   // 普通窗口永远不看 Code 那栏
   assert.equal(pickStyleId({ inCode: false, agentId: "hanako", codeStyles, styles }), "gentle");
@@ -125,11 +125,11 @@ test("Code 窗口的风格音效：配了用自己的，没配跟随普通", () 
 
 test("Code 那两栏的配置走白名单，脏值不落盘", () => {
   const cfg = normalizeConfig({
-    agentCodeStyles: { hanako: "default", yumi: "not_a_style", "" : "default" },
-    agentCodeSounds: { hanako: "my.wav", yumi: "silent", other: "default" }
+    agentCodeStyles: { hanako: "default", agent_b: "not_a_style", "" : "default" },
+    agentCodeSounds: { hanako: "my.wav", agent_b: "silent", agent_c: "default" }
   });
   assert.deepEqual(cfg.agentCodeStyles, { hanako: "default" });
-  assert.deepEqual(cfg.agentCodeSounds, { hanako: "my.wav", yumi: "silent", other: "default" });
+  assert.deepEqual(cfg.agentCodeSounds, { hanako: "my.wav", agent_b: "silent", agent_c: "default" });
 });
 
 test("老配置没有 Code 字段时补成空对象（全部跟随普通）", () => {
