@@ -2,6 +2,14 @@
 
 当前发布候选：`0.1.1`（2026-10-13；仅修复版本）
 
+## Code 窗口提醒分隔（2026-10-25，本地开发）
+
+- 定向命令：`node --test tests/session-kind.test.js tests/notification-title-order.test.js`，全过。全量：`node --test`，**483/483 通过**（原先 472，新增 11 条）。
+- 覆盖的新口径：namespace=code 认作 Code 窗口、无 sessionId 时按路径查、事件里的 sessionId 是会话文件名要先失败再改走 legacySessionPath、查询失败不抛错也不缓存失败、同一会话只查一次、Code 那两栏走白名单且空 id 条目丢弃、旧配置自动补成空对象（全部跟随普通）。
+- 实机确认（2026-10-25）：`session:get` 返回的 `namespace` 能区分 home / code / app；两个 Code 页会话实测都是 `namespace=code`；`session:list` 的 70 条里一条 Code 会话都没有，字段（path/title/kind/visibility/ownerPluginId）无一项能区分。
+- 未验证：真实 Code 窗口跑完一轮后横幅实际长什么样、以及 Code 专用音效在真机上的播放效果；这两项要靠实机弹窗验收，自动测试证明不了。
+- 已知边界：判不出分区时一律按普通窗口处理（宁可不标记号，也不误标）。单条提醒最多多两次 `session:get`（命中缓存就只有 0 次），超时 2.5 秒。
+
 ## 通知主腿可靠性与图标校正（2026-10-18，本地开发）
 
 - 定向命令：`node --test tests/toast-delivery.test.js tests/toast-duration.test.js tests/app-smoke.test.js tests/focus-notify.test.js tests/external-notify.test.js tests/debug-log.test.js`，**48/48 通过**。新增两条覆盖：超时重试一次后拿到标记即算成功、脚本明确报错不重试直接降级。
