@@ -47,6 +47,21 @@ test("没有 sessionId 时退回按会话路径查", async () => {
   assert.equal(bus.calls[0].payload.legacySessionPath, "D:\\hana\\agents\\hanako\\sessions\\x.jsonl");
 });
 
+test("事件里的 sessionId 是会话文件名，直接问拿不到时改按路径再问一次", async () => {
+  const legacyId = "2026-10-25T01-36-23-921Z_01a170b3-a571-7407-be32-a2239789a733";
+  const sessionPath = "D:\\hana\\agents\\hanako\\sessions\\" + legacyId + ".jsonl";
+  const bus = fakeBus((name, payload) => {
+    if (payload.sessionId) throw new Error("session_manifest_ref_required");
+    return { session: { namespace: "code", title: "改代码" } };
+  });
+  const resolve = createSessionMetaResolver({ bus });
+  const meta = await resolve({ sessionId: legacyId, sessionPath });
+  assert.equal(meta.namespace, "code");
+  assert.equal(meta.title, "改代码");
+  assert.equal(bus.calls.length, 2);
+  assert.equal(bus.calls[1].payload.legacySessionPath, sessionPath);
+});
+
 test("普通窗口不加记号", async () => {
   const bus = fakeBus({ session: { namespace: "home", title: "闲聊" } });
   const resolve = createSessionMetaResolver({ bus });
@@ -63,14 +78,15 @@ test("查询失败不抛错，按普通窗口处理，也不缓存失败", async
   let attempt = 0;
   const bus = fakeBus(() => {
     attempt += 1;
-    if (attempt === 1) throw new Error("bus timeout");
+    if (attempt <= 2) throw new Error("bus timeout");
     return { session: { namespace: "code" } };
   });
   const resolve = createSessionMetaResolver({ bus });
-  const first = await resolve({ sessionId: "sess_retry" });
-  assert.equal(first.namespace, "");
+  const sessionPath = "D:\\hana\\agents\\hanako\\sessions\\y.jsonl";
+  const first = await resolve({ sessionId: "sess_retry", sessionPath });
+  assert.equal(first.namespace, "", "两条路都失败就当作普通窗口");
   assert.equal(first.title, "");
-  const second = await resolve({ sessionId: "sess_retry" });
+  const second = await resolve({ sessionId: "sess_retry", sessionPath });
   assert.equal(second.namespace, "code", "失败结果不能进缓存，下次要能查到");
 });
 
