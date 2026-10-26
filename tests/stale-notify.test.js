@@ -1,11 +1,11 @@
-// 提个醒 · 判定过时就不再发的接线测试
+// 提个醒 · 通知「现在忙不忙」的复检与暂缓补发
 //
 // 锁的是 2026-10-26 实机故障：会话跑完一轮（stop），提个醒判定「说完了」，
 // 但从判定到真正发出去中间走了分区查询 + 文案润色，整整 61 秒；
 // 这期间窗口已经进了下一轮，通知才慢吞吞弹出来，看着就是「明明还在干活却报了回你啦」。
 //
-// 现在的规则：判定之后只要这个会话又开工（turn_start）、又起后台任务、又开始等叫醒，
-// 这条提醒就作废，不弹。
+// 规则：发送前发现窗口还忙着，这条不丢——先扣在手里，等它闲下来补发；
+// 真等太久还是忙，就带上「等太久了」照样发。每个回合都得有回响。
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -36,7 +36,10 @@ function blockedSpawn() {
 const SESSION_PATH = "C:/fake/.hanako/agents/hanako/sessions/stale-1.jsonl";
 const SESSION_ID = "stale-1";
 // 会话查询要拖一点：真实环境里就是这段时间让「判定」和「发送」分了家。
-const SLOW_QUERY_MS = 60;
+const SLOW_QUERY_MS = 40;
+// 测试里把回看间隔压短，不用真等 15 秒 × 20 次。
+const RETRY_MS = 50;
+const MAX_TRIES = 3; // 50ms × 3 = 150ms 后带实情补发
 
 function makeCtx(dataDir) {
   const seen = { subscribed: null, notified: [] };
@@ -52,11 +55,11 @@ function makeCtx(dataDir) {
         if (verb === "agent:list") return { agents: [{ id: "hanako", name: "小花" }] };
         if (verb === "session:list") {
           await new Promise((resolve) => setTimeout(resolve, SLOW_QUERY_MS));
-          return { sessions: [{ path: SESSION_PATH, sessionId: SESSION_ID, title: "过时提醒测试" }] };
+          return { sessions: [{ path: SESSION_PATH, sessionId: SESSION_ID, title: "暂缓提醒测试" }] };
         }
         if (verb === "session:get") {
           await new Promise((resolve) => setTimeout(resolve, SLOW_QUERY_MS));
-          return { session: { path: SESSION_PATH, sessionId: SESSION_ID, title: "过时提醒测试" } };
+          return { session: { path: SESSION_PATH, sessionId: SESSION_ID, title: "暂缓提醒测试" } };
         }
         return {};
       }
@@ -72,11 +75,13 @@ function makeCtx(dataDir) {
   return { ctx, seen };
 }
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 async function waitFor(predicate, timeoutMs = 4000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (predicate()) return true;
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await sleep(5);
   }
   return false;
 }
@@ -106,58 +111,74 @@ async function withHarness(fn) {
   );
   const { ctx, seen } = makeCtx(dir);
   toastDependencies.dependencies = { spawnProcess: blockedSpawn, timeoutMs: 200 };
+  toastDependencies.heldRetryMs = RETRY_MS;
+  toastDependencies.heldMaxTries = MAX_TRIES;
   try {
     await apply(ctx);
     assert.ok(seen.subscribed, "应该订阅了总线");
     const send = (event) => seen.subscribed.callback(event, SESSION_PATH);
     send(userMessage());
-    await waitFor(() => true, 50);
+    await sleep(50);
     await fn({ send, notified: seen.notified });
   } finally {
     toastDependencies.dependencies = undefined;
     toastDependencies.backgroundTasks = null;
+    toastDependencies.heldRetryMs = null;
+    toastDependencies.heldMaxTries = null;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }
 
-test("判定之后窗口又开工：这条「回你啦」作废", async () => {
+test("判定之后窗口又开工：当下不弹，等不动了再补，绝不静默", async () => {
   await withHarness(async ({ send, notified }) => {
     send(turnEnd("第二轮的中间汇报"));
     // 发送链路还在查会话、拼文案，这时候窗口已经进了下一轮
     send(turnStart());
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    assert.equal(notified.length, 0, "已经开工了还弹「回你啦」就是误导，应当作废");
+    await sleep(60);
+    assert.equal(notified.length, 0, "还忙着的时候不该弹「回你啦」");
+
+    // 一直没等到收工，到次数上限后带着实情补上
+    const arrived = await waitFor(() => notified.length > 0, 2000);
+    assert.equal(arrived, true, "等超了也必须补一条，不能一声不响");
+    const body = String(notified[0].body || "");
+    assert.match(body, /等太久了/, "补发时要说清这是久等来的");
+    assert.match(body, /中间汇报/, "原来的内容还在");
   });
 });
 
-test("判定之后又起了后台任务：作废", async () => {
+test("判定之后又起后台任务：同样先扣住，不静默丢弃", async () => {
   await withHarness(async ({ send, notified }) => {
     send(turnEnd("先把话说完"));
     send(backgroundTask("upsert", "child-b"));
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    assert.equal(notified.length, 0, "后台任务又跑起来了，后面还有话要说，这条不该弹");
+    await sleep(60);
+    assert.equal(notified.length, 0, "后台任务又跑起来了，现在弹就是打断人");
+    const arrived = await waitFor(() => notified.length > 0, 2000);
+    assert.equal(arrived, true, "最后仍要有回响");
   });
 });
 
-test("对照：判定之后没有新动静，照常提醒", async () => {
+test("对照：判定之后没有新动静，立刻提醒且不带久等说明", async () => {
   await withHarness(async ({ send, notified }) => {
     send(turnEnd("这回真说完了"));
-    const ok = await waitFor(() => notified.length > 0);
-    assert.equal(ok, true, "会话确实闲着，通知该弹");
-    const text = `${notified[0].title || ""} ${notified[0].body || ""}`;
-    assert.match(text, /过时提醒测试/, "标题带会话名");
+    const ok = await waitFor(() => notified.length > 0, 1000);
+    assert.equal(ok, true, "会话确实闲着，通知该马上弹");
+    const body = String(notified[0].body || "");
+    assert.doesNotMatch(body, /等太久了/);
+    assert.match(`${notified[0].title || ""}`, /暂缓提醒测试/, "标题带会话名");
   });
 });
 
-test("开工之后那一轮自己说完，仍然会正常提醒", async () => {
+test("开工后那一轮自己说完：弹新的那条，旧的不重复弹", async () => {
   await withHarness(async ({ send, notified }) => {
     send(turnEnd("中间汇报"));
     send(turnStart());
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    assert.equal(notified.length, 0, "第一条作废");
+    await sleep(40);
+    assert.equal(notified.length, 0, "第一条先扣着");
     send(turnEnd("这才是结论"));
-    const ok = await waitFor(() => notified.length > 0);
-    assert.equal(ok, true, "新回合说完要照常提醒，不能一压到底");
-    assert.match(`${notified[0].body || ""}`, /这才是结论/);
+    const ok = await waitFor(() => notified.length > 0, 1500);
+    assert.equal(ok, true, "真结论要弹出来");
+    assert.match(String(notified[0].body || ""), /这才是结论/);
+    const waited = await sleep(300).then(() => notified.length);
+    assert.equal(waited, 1, "扣着的那条已被新回响接替，不该再冒一条");
   });
 });

@@ -46,6 +46,7 @@ import { normalizeSessionPath, parseSessionIdentity, resolveSessionTitleWithRetr
 import { codeMarker, createSessionMetaResolver, isCodeSession, pickSoundId, pickStyleId } from './lib/session-kind.js';
 import { createRefineModelConfig } from './lib/refine-model.js';
 import { buildNotificationCopy } from './lib/notification-copy.js';
+import { clipCodePoints } from './lib/text-clip.js';
 import { createFocusNotificationHandler, FOCUS_NOTIFY_SERVICE } from './lib/focus-notify.js';
 import { appendDebugLog, isDebugNoisyEvent } from './lib/debug-log.js';
 import { SessionParticipation } from './lib/session-participation.js';
@@ -73,6 +74,10 @@ export const toastDependencies = {
   waitDebt: null,
   // 补发静默期（毫秒）。null/未设=默认；测试可注入短值。
   deferredFlushGraceMs: null,
+  // 暂缓通知的回看间隔（毫秒）。null/未设=默认 15 秒；测试可注入短值。
+  heldRetryMs: null,
+  // 暂缓通知最多等几次；等超了带实情照样发，绝不丢。
+  heldMaxTries: null,
 };
 
 /**
@@ -135,19 +140,97 @@ export async function apply(ctx) {
   const waitDebt = toastDependencies.waitDebt || new WaitDebtTracker();
   // 待补发的回合：会话 id -> { timer, info }。静默期内开工则取消并丢弃。
   const pendingFlushes = new Map();
-  // 每个会话最近一次开工的时间戳。判定「说完了」到真正发出去之间隔着分区查询、
-  // 文案润色、头像与音效读取，慢的时候能拖一分钟；这期间窗口又开工了，那条
-  // 「回你啦」就已经不成立（2026-10-26 实机：判定后 61 秒才发出，窗口早进了下一轮）。
-  const turnStarts = new Map();
 
-  /** 判定之后会话是否又开工；返回原因，空串表示仍然闲着 */
-  function staleSinceJudgement(sessionId, judgedAt) {
-    if (!judgedAt) return '';
-    const lastStart = turnStarts.get(sessionId) || 0;
-    if (lastStart > judgedAt) return '窗口又开工';
+  // 每个会话最近一次开工 / 收工的时间戳。开工晚于收工 = 现在正忙着。
+  // 判定「说完了」到真正发出去之间隔着分区查询、文案润色、头像与音效读取，
+  // 慢的时候能拖一分钟；这期间窗口又开工了，那条「回你啦」就不该现在弹
+  // （2026-10-26 实机：判定后 61 秒才发出，窗口早进了下一轮）。
+  // 不用「判定之后有没有开过工」：那样一旦开过工就永远判忙，缓下的通知再也发不出去。
+  const turnStarts = new Map();
+  const turnEnds = new Map();
+
+  /** 这个会话现在是不是还忙着；返回原因，空串表示闲着 */
+  function sessionBusyReason(sessionId) {
+    const start = turnStarts.get(sessionId) || 0;
+    const end = turnEnds.get(sessionId) || 0;
+    if (start > end) return '窗口又开工';
     if (backgroundTasks.has(sessionId)) return '后台任务又开始';
     if (waitDebt.has(sessionId)) return '又在等后台结果';
     return '';
+  }
+
+  // 暂缓发出的通知。判定过时不能丢——每个回合都得有回响；
+  // 成品（标题/正文/头像/音效）先缓在这里，等会话真正安静了再发。
+  // 真等太久还是忙，就带上「等太久了」的实情照样发，绝不一声不响。
+  const heldToasts = new Map();
+  const HELD_RETRY_MS = 15000;
+  const HELD_MAX_TRIES = 20; // 15 秒 × 20 约 5 分钟
+  const HELD_OVERDUE_NOTICE = '等太久了，先叫你一声';
+  // 测试可以注入更短的回看间隔与更少的尝试次数，不必真等五分钟。
+  const heldRetryMs = Number(toastDependencies.heldRetryMs) > 0
+    ? Number(toastDependencies.heldRetryMs)
+    : HELD_RETRY_MS;
+  const heldMaxTries = Number(toastDependencies.heldMaxTries) > 0
+    ? Number(toastDependencies.heldMaxTries)
+    : HELD_MAX_TRIES;
+
+  function holdStaleToast({ sessionId, payload, reason, kind }) {
+    const previous = heldToasts.get(sessionId);
+    if (previous?.timer) clearTimeout(previous.timer);
+    if (previous) dbg(`暂缓的通知被后一条接替 session=${sessionId}`);
+    const hold = { sessionId, payload, reason, kind, tries: 0, timer: null };
+    heldToasts.set(sessionId, hold);
+    dbg(`通知暂缓（${reason}），等窗口静下来再补 session=${sessionId} kind=${kind}`);
+    scheduleHeldRetry(sessionId);
+    return hold;
+  }
+
+  function scheduleHeldRetry(sessionId) {
+    const hold = heldToasts.get(sessionId);
+    if (!hold || hold.timer) return;
+    hold.timer = setTimeout(() => {
+      hold.timer = null;
+      void releaseHeldToast(sessionId);
+    }, heldRetryMs);
+    hold.timer.unref?.();
+  }
+
+  function dropHeldToast(sessionId, reason) {
+    const hold = heldToasts.get(sessionId);
+    if (!hold) return;
+    if (hold.timer) clearTimeout(hold.timer);
+    heldToasts.delete(sessionId);
+    dbg(`丢弃暂缓通知（${reason}）session=${sessionId}`);
+  }
+
+  /** 到点回看：还忙着就继续等；静了、或等超了，就把手里这条发出去 */
+  async function releaseHeldToast(sessionId) {
+    const hold = heldToasts.get(sessionId);
+    if (!hold) return;
+    hold.tries += 1;
+    const stale = sessionBusyReason(sessionId);
+    if (stale && hold.tries < heldMaxTries) {
+      scheduleHeldRetry(sessionId);
+      return;
+    }
+    heldToasts.delete(sessionId);
+    // 等超了还没静：照样发，但把实情摆在正文末尾，不冒充「刚刚说完」。
+    const overdue = Boolean(stale);
+    const payload = overdue
+      ? { ...hold.payload, body: withOverdueNotice(hold.payload.body) }
+      : hold.payload;
+    try {
+      const via = await notify(payload);
+      dbg(`暂缓通知补发 session=${sessionId} tries=${hold.tries} overdue=${overdue} via=${via} title=${payload.title}`);
+    } catch (error) {
+      dbg('暂缓通知补发失败：' + (error?.message || error));
+    }
+  }
+
+  /** 正文只剩 24 字的款，备注插在末尾，正文相应让字数 */
+  function withOverdueNotice(body) {
+    const room = Math.max(10, 24 - HELD_OVERDUE_NOTICE.length);
+    return `${clipCodePoints(body, room)} ${HELD_OVERDUE_NOTICE}`;
   }
   const flushGraceMs = Number(toastDependencies.deferredFlushGraceMs) > 0
     ? Number(toastDependencies.deferredFlushGraceMs)
@@ -295,7 +378,7 @@ export async function apply(ctx) {
   registerFocusNotificationService();
 
   // ── 组装并弹一条 ──
-  async function doToast(decision, toastStyle, copyOverride, judgedAt = 0) {
+  async function doToast(decision, toastStyle, copyOverride) {
     const cfg = config.get();
     // 先弄清这条提醒是普通窗口还是 Code 页窗口：它同时决定标题记号、文案风格和音效。
     // 查不到就按普通窗口走，绝不让一次查询失败拖住或丢掉提醒。
@@ -386,21 +469,25 @@ export async function apply(ctx) {
     }
 
     // 从判定到这里，中间走完了分区查询、润色、标题、头像、音效。
-    // 这段时间里会话要是又开工，这条提醒已经不成立，不能发。
-    const stale = staleSinceJudgement(decision.sessionId, judgedAt);
-    if (stale) {
-      dbg(`通知已过时（${stale}），不弹 session=${decision.sessionId} kind=${decision.kind}`);
-      return;
-    }
-
-    const via = await notify({
+    // 这段时间里会话要是又开工，这条提醒就不能现在发——但也不能丢：
+    // 每个回合都得有回响，先扣在手里，等窗口真正静下来再补。
+    const stale = sessionBusyReason(decision.sessionId);
+    const payload = {
       title,
       body,
       icon: avatar || undefined,
       sound,
       duration: cfg.toastDuration,
       style: toastStyle === 'plain' ? 'plain' : 'icon'
-    });
+    };
+    if (stale) {
+      holdStaleToast({ sessionId: decision.sessionId, payload, reason: stale, kind: decision.kind });
+      return;
+    }
+
+    // 这一条成了新的回响，手里扣的旧消息就不再单独特发，免得两条撞在一起。
+    dropHeldToast(decision.sessionId, '有更新的回响了');
+    const via = await notify(payload);
     dbg(`通知提交结果 session=${decision.sessionId} kind=${decision.kind} via=${via} title=${title}`);
   }
 
@@ -564,8 +651,7 @@ export async function apply(ctx) {
       const result = notifier.flush(sessionId);
       if (result) {
         try {
-          const flushAt = Date.now();
-          await doToast(result, config.get().toastStyle, undefined, flushAt);
+          await doToast(result, config.get().toastStyle);
         } catch { /* 兜底：合并补弹失败不影响主流程 */ }
       }
     }, windowMs);
@@ -659,10 +745,8 @@ export async function apply(ctx) {
       dbg(`无法确认当前聊天是否正在看，保守提醒 session=${sessionId}`);
     }
 
-    // 判定基准用回合到达时的时间（now），不能用进入本函数的时间：
-    // 前面「是否在前台」那一步会让出执行，turn_start 可能已经在这时插入，
-    // 用晚一点的时间当基准就会把它当成「之后才发生的」而拦不住。
-    const judgedAt = now;
+    // 判定基准已经从「时刻对比」改成「现在忙不忙」（见 sessionBusyReason）：
+    // 用时刻比的话，开工过一次就永远判忙，缓下的通知再也发不出去。
     const decision = notifier.decide(
       {
         sessionId,
@@ -685,7 +769,7 @@ export async function apply(ctx) {
       return;
     }
 
-    await doToast(decision, cfg.toastStyle, undefined, judgedAt);
+    await doToast(decision, cfg.toastStyle);
     // 用 ?? 而不是 ||：0 是合法配置（不合并），|| 会把它当成假值兜回 30 秒。
     if (decision.kind === 'first') scheduleFlush(sessionId, cfg.mergeWindowMs ?? 30000);
   }
@@ -769,6 +853,7 @@ export async function apply(ctx) {
               dbg(`会话关闭，清空后台任务计数 session=${closedSid}`);
             }
             deferredTurns.forget(closedSid);
+            dropHeldToast(closedSid, '会话关闭');
             cancelPendingFlush(closedSid, '会话关闭');
             waitDebt.forget(closedSid);
           }
@@ -853,6 +938,8 @@ export async function apply(ctx) {
 
         const info = parseTurnEnd(event, sessionPath);
         if (!info) return;
+        // 记下收工时刻：通知发送前要用「开工晚于收工」判断这个窗口现在还忙不忙。
+        if (info.sessionId) turnEnds.set(info.sessionId, Date.now());
         if (info.aborted && isUserInitiatedAbortReason(info.reason)) {
           abnormalTurns.onTurnSuccess(info.sessionId);
           return;
