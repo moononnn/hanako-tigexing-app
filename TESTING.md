@@ -2,6 +2,15 @@
 
 当前发布候选：`0.1.1`（2026-10-13；仅修复版本）
 
+## 文案截断切碎 emoji（2026-10-26，本地开发）
+
+- 现场：Code 窗口弹窗正文尾部出现一个「�」方块。日志反查 `app-data/tigexing-app/tigexing/debug.log` 12:21:31 那条，`body` 是 `半个emoji被截断啦！已修好，重载后提醒提交\ud83c…`，孤立高位代理摆在明处。
+- 成因：润色正文 `BODY_MAX = 24`，`String#slice` 按 UTF-16 单元切，emoji 占两个单元。23 字正文 + 一颗 emoji = 25 单元，切在第 24 位正好劈开代理对；孤立代理经 PowerShell 环境变量传参编码后变成 `U+FFFD`。
+- 修复：新增 `lib/text-clip.js`（`clipCodePoints`，`Array.from` 按码点切），接进四处可见文案截断：`refine.js` clipText、`style.js` clip 兜底与 sessionPrefix、`policy.js` makeSnippet。中文长度与旧行为一致，emoji 不会再被劈开。
+- 定向命令：`node --test tests/text-clip.test.js`，**6/6 通过**。全量：`node --test`，**493/493 通过**。
+- 实机验证：修前 `slice(0,24)` 产出 `…改哦！\ud83c…`（孤立代理 true），修后 `clipCodePoints` 产出完整整句带 🌿（孤立代理 false）；用 `sendToast` 直发一条自测通知，`sent: true`，弹窗尾巴是整颗小草，无方块。
+- 已知边界：ZWJ 组合 emoji（如 👨‍👩‍👧）仍会在码点边界被拆开，结果是视觉上少半个人，不会变成替换字符。
+
 ## Code 窗口提醒分隔（2026-10-25，本地开发）
 
 - 定向命令：`node --test tests/session-kind.test.js tests/notification-title-order.test.js`，全过。全量：`node --test`，**483/483 通过**（原先 472，新增 11 条）。
