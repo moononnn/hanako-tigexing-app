@@ -135,6 +135,20 @@ export async function apply(ctx) {
   const waitDebt = toastDependencies.waitDebt || new WaitDebtTracker();
   // 待补发的回合：会话 id -> { timer, info }。静默期内开工则取消并丢弃。
   const pendingFlushes = new Map();
+  // 每个会话最近一次开工的时间戳。判定「说完了」到真正发出去之间隔着分区查询、
+  // 文案润色、头像与音效读取，慢的时候能拖一分钟；这期间窗口又开工了，那条
+  // 「回你啦」就已经不成立（2026-10-26 实机：判定后 61 秒才发出，窗口早进了下一轮）。
+  const turnStarts = new Map();
+
+  /** 判定之后会话是否又开工；返回原因，空串表示仍然闲着 */
+  function staleSinceJudgement(sessionId, judgedAt) {
+    if (!judgedAt) return '';
+    const lastStart = turnStarts.get(sessionId) || 0;
+    if (lastStart > judgedAt) return '窗口又开工';
+    if (backgroundTasks.has(sessionId)) return '后台任务又开始';
+    if (waitDebt.has(sessionId)) return '又在等后台结果';
+    return '';
+  }
   const flushGraceMs = Number(toastDependencies.deferredFlushGraceMs) > 0
     ? Number(toastDependencies.deferredFlushGraceMs)
     : DEFERRED_FLUSH_GRACE_MS;
@@ -281,7 +295,7 @@ export async function apply(ctx) {
   registerFocusNotificationService();
 
   // ── 组装并弹一条 ──
-  async function doToast(decision, toastStyle, copyOverride) {
+  async function doToast(decision, toastStyle, copyOverride, judgedAt = 0) {
     const cfg = config.get();
     // 先弄清这条提醒是普通窗口还是 Code 页窗口：它同时决定标题记号、文案风格和音效。
     // 查不到就按普通窗口走，绝不让一次查询失败拖住或丢掉提醒。
@@ -369,6 +383,14 @@ export async function apply(ctx) {
           sound = undefined;
         }
       }
+    }
+
+    // 从判定到这里，中间走完了分区查询、润色、标题、头像、音效。
+    // 这段时间里会话要是又开工，这条提醒已经不成立，不能发。
+    const stale = staleSinceJudgement(decision.sessionId, judgedAt);
+    if (stale) {
+      dbg(`通知已过时（${stale}），不弹 session=${decision.sessionId} kind=${decision.kind}`);
+      return;
     }
 
     const via = await notify({
@@ -542,7 +564,8 @@ export async function apply(ctx) {
       const result = notifier.flush(sessionId);
       if (result) {
         try {
-          await doToast(result, config.get().toastStyle);
+          const flushAt = Date.now();
+          await doToast(result, config.get().toastStyle, undefined, flushAt);
         } catch { /* 兜底：合并补弹失败不影响主流程 */ }
       }
     }, windowMs);
@@ -636,6 +659,10 @@ export async function apply(ctx) {
       dbg(`无法确认当前聊天是否正在看，保守提醒 session=${sessionId}`);
     }
 
+    // 判定基准用回合到达时的时间（now），不能用进入本函数的时间：
+    // 前面「是否在前台」那一步会让出执行，turn_start 可能已经在这时插入，
+    // 用晚一点的时间当基准就会把它当成「之后才发生的」而拦不住。
+    const judgedAt = now;
     const decision = notifier.decide(
       {
         sessionId,
@@ -658,7 +685,7 @@ export async function apply(ctx) {
       return;
     }
 
-    await doToast(decision, cfg.toastStyle);
+    await doToast(decision, cfg.toastStyle, undefined, judgedAt);
     // 用 ?? 而不是 ||：0 是合法配置（不合并），|| 会把它当成假值兜回 30 秒。
     if (decision.kind === 'first') scheduleFlush(sessionId, cfg.mergeWindowMs ?? 30000);
   }
@@ -737,6 +764,7 @@ export async function apply(ctx) {
           const closedSid = sessionIdFromPath(identity?.sessionPath || sessionPath);
           if (closedSid) {
             abnormalTurns.forget(closedSid);
+            turnStarts.delete(closedSid);
             if (backgroundTasks.forget(closedSid)) {
               dbg(`会话关闭，清空后台任务计数 session=${closedSid}`);
             }
@@ -778,6 +806,9 @@ export async function apply(ctx) {
         if (et === 'turn_start') {
           const sid = sessionIdFromPath(sessionPath) || String(event?.sessionId || '');
           if (sid) {
+            // 记下开工时刻：完成提醒在发出去之前要拿它比对，避免把上一轮的「回你啦」
+            // 拖到这一轮才弹出来。
+            turnStarts.set(sid, Date.now());
             // 收齐后的静默期内又开工 = 那不是收尾，补发作废。
             cancelPendingFlush(sid, '窗口又开工');
             // 被压住的那句已经确认是过程，不补发也不堆在内存里。
