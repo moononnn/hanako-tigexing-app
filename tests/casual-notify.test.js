@@ -211,7 +211,7 @@ test("宿主已提醒同一句：提个醒不再弹第二遍", () => {
   }, 1000);
   assert.equal(memory.covers("hanako", "今天有空吗？要不要一起看看新到的资料", { hostShown: true, now: 2000 }), true);
   assert.equal(memory.covers("hanako", "今天有空吗？要不要一起看看新到的资料", { hostShown: false, now: 2000 }), false);
-  assert.equal(memory.covers("yumi", "今天有空吗？要不要一起看看新到的资料", { hostShown: true, now: 2000 }), false);
+  assert.equal(memory.covers("agent_b", "今天有空吗？要不要一起看看新到的资料", { hostShown: true, now: 2000 }), false);
 });
 
 test("宿主那句比我们长：认得出是同一句", () => {
