@@ -122,7 +122,7 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * 不写死等待时长：全量跑时机器忙，固定时长会不够，
  * 表现为「明明弹了却断言说没弹」——那是测试自己的抖动，不是产品的。
  */
-async function waitFor(predicate, timeoutMs = 5000) {
+async function waitFor(predicate, timeoutMs = 30000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (predicate()) return true;
@@ -301,14 +301,33 @@ test("她自己说的话不能被当成伙伴的发言弹出来", async () => {
   });
 });
 
-test("伙伴没新发言（未读数没涨）就不该弹", async () => {
+test("预览不比她最后一次说话更新：就不该当成伙伴的发言弹出来", async () => {
   await withHarness(async ({ send, notified }) => {
-    send(casualEntry("user", "在吗"));
-    await wait(30);
-    // 她自己说话也会带一条 casual_unread，伙伴未读数没涨
-    send(casualUnread({ unread: 0, text: "在吗" }));
-    await wait(500);
+    // 实机（2026-10-30）：App 刚重载时面板里有未读，她自己发一句话
+    // 也会带着一条 casual_unread——那会儿要是照着未读数认，就会把她的话弹出去。
+    // 宿主里这条未读预览就是她刚发的那条，时刻同源同值，所以这里用同一个时刻。
+    const at = new Date().toISOString();
+    send(casualEntry("user", "这是我自己的话", { occurredAt: at }));
+    await wait(20);
+    send(casualUnread({ unread: 3, text: "这是我自己的话", occurredAt: at }));
+    await wait(600);
+
     const casualToasts = notified.filter((n) => String(n.title || "").includes("闲聊"));
-    assert.equal(casualToasts.length, 0, "没有新的伙伴发言就不该弹");
+    assert.equal(casualToasts.length, 0, "她自己的话不该被当成伙伴的发言弹出来");
+  });
+});
+
+test("预览比她最后一次说话更新：那是伙伴新说的，该弹", async () => {
+  await withHarness(async ({ send, notified }) => {
+    const at = new Date().toISOString();
+    send(casualEntry("user", "在吗", { occurredAt: at }));
+    await wait(20);
+    // 伙伴随后说了话，预览时刻比她那次更新
+    send(casualUnread({ unread: 1, text: "在呢", occurredAt: new Date(Date.now() + 50).toISOString() }));
+    const arrived = await waitFor(() => notified.some((n) => String(n.title || "").includes("闲聊")));
+    const casualToasts = notified.filter((n) => String(n.title || "").includes("闲聊"));
+    assert.equal(arrived, true, "伙伴新说的话该弹");
+    assert.equal(casualToasts.length, 1, "只该弹一条");
+    assert.match(String(casualToasts[0].body || ""), /在呢/, "内容要在");
   });
 });

@@ -903,7 +903,12 @@ export async function apply(ctx) {
     }
     // 本体若也在提醒同一句，别弹两遍。宿主本体那条只在「不聚焦」时弹，
     // 它弹了才轮到我们退让。
-    if (hostNotices.covers(agentId, texts, { hostShown: !(await isHanaFocused()) })) {
+    //
+    // 先问「宿主报过同一句吗」，问不出就不查窗口焦点：
+    // 查焦点要拉起 PowerShell 查前台窗口，放在关键路径上会让每一条提醒
+    // 都先等一次进程启动（实机：CI 上并发跑测试时，PowerShell 启动慢到
+    // 整条提醒都发不出去）。绝大多数情况宿主压根没报过，没必要查。
+    if (hostNotices.covers(agentId, texts, { hostShown: true }) && !(await isHanaFocused())) {
       dbg('闲聊提醒跳过：宿主已提醒同一句');
       return;
     }
