@@ -125,7 +125,8 @@ async function withHarness(fn) {
     toastDependencies.backgroundTasks = null;
     toastDependencies.heldRetryMs = null;
     toastDependencies.heldMaxTries = null;
-    fs.rmSync(dir, { recursive: true, force: true });
+    // 设 TIGEXING_KEEP_LOGS=1 可以留下临时目录，查日志用。
+    if (!process.env.TIGEXING_KEEP_LOGS) fs.rmSync(dir, { recursive: true, force: true });
   }
 }
 
@@ -177,7 +178,12 @@ test("开工后那一轮自己说完：弹新的那条，旧的不重复弹", as
     send(turnEnd("这才是结论"));
     const ok = await waitFor(() => notified.length > 0, 1500);
     assert.equal(ok, true, "真结论要弹出来");
-    assert.match(String(notified[0].body || ""), /这才是结论/);
+    // 断言弹出来的是「真结论」那条，而不是扣着的「中间汇报」——
+    // 不按数组下标断言：机器忙时，扣着的那条可能在等待里就补发了，
+    // 那时 notified[0] 装的是它，按下标断言就成了测机器快慢。
+    const bodies = notified.map((n) => String(n.body || ""));
+    assert.equal(bodies.length, 1, "只该弹一条");
+    assert.match(bodies[0], /这才是结论/);
     const waited = await sleep(300).then(() => notified.length);
     assert.equal(waited, 1, "扣着的那条已被新回响接替，不该再冒一条");
   });

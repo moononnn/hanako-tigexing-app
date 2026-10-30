@@ -603,7 +603,7 @@
   
   <div class="card" style="border-color:var(--warn);background:var(--warn-soft)">
     <h2>小提示</h2>
-    <div class="hint">提个醒现在接管 <b>聊天回复、模型异常中断、计划任务和巡检完成</b>四类提醒。为避免聊天回复双弹，可以把 Hana 设置里「聊天回复完成」那条原版通知设为「从不」。计划任务和巡检都会留一点时间识别 Hana 原版通知；检测到同一活动已有原版通知时，提个醒就跳过补弹。</div>
+    <div class="hint">提个醒现在接管 <b>聊天回复、闲聊窗口消息、模型异常中断、计划任务和巡检完成</b>五类提醒。为避免聊天回复双弹，可以把 Hana 设置里「聊天回复完成」那条原版通知设为「从不」。计划任务和巡检都会留一点时间识别 Hana 原版通知；检测到同一活动已有原版通知时，提个醒就跳过补弹。</div>
   </div>
   
 
@@ -617,6 +617,16 @@
         <button class="seg-btn on" data-trigger="whenSessionUnfocused">焦点不在该聊天时<span class="seg-desc">当前版本无法可靠确认聊天焦点，会保守提醒，避免漏通知</span></button>
         <button class="seg-btn " data-trigger="whenUnfocused">焦点不在 HanaAgent 时<span class="seg-desc">HanaAgent 在前台就不提醒，切到别的应用才提醒</span></button>
         <button class="seg-btn " data-trigger="never">从不提醒<span class="seg-desc">关掉弹窗，需要时再打开</span></button>
+      </div>
+    </div>
+
+    <div class="mode-block">
+      <div class="mode-name">闲聊窗口消息</div>
+      <div class="hint" style="margin-bottom:8px">Hana 1.5.7 起的「闲聊」：伙伴在侧边栏闲聊窗口里说话。提个醒按下面的档位提醒；若 Hana 原版已经提醒过同一句，提个醒会跳过补弹，避免重复。</div>
+      <div class="seg" id="seg-casual">
+        <button class="seg-btn on" data-trigger="proactive">只提醒主动开口<span class="seg-desc">对方主动打招呼、主动提醒时弹；回你话不弹（推荐）</span></button>
+        <button class="seg-btn " data-trigger="always">每次都提醒<span class="seg-desc">对方在闲聊里说的每句话都弹，不管 Hana 在不在前台</span></button>
+        <button class="seg-btn " data-trigger="never">从不提醒<span class="seg-desc">闲聊不打扰</span></button>
       </div>
     </div>
 
@@ -1454,6 +1464,7 @@ function boot() {
 
   var TRIGGER_FIELDS = {
     "seg-chat": "chatTrigger",
+    "seg-casual": "casualTrigger",
     "seg-scheduled": "scheduledTrigger",
     "seg-patrol": "patrolTrigger"
   };
@@ -2104,6 +2115,7 @@ function boot() {
         }
       }
       segOn("seg-chat", cfg.chatTrigger);
+      segOn("seg-casual", cfg.casualTrigger);
       segOn("seg-scheduled", cfg.scheduledTrigger);
       segOn("seg-patrol", cfg.patrolTrigger);
       segOn("seg-duration", cfg.toastDuration);

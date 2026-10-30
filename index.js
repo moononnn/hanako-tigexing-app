@@ -11,7 +11,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { Notifier, isInQuietHours, resolveChatTrigger } from './lib/policy.js';
+import { Notifier, isInQuietHours, resolveChatTrigger, makeSnippet } from './lib/policy.js';
 import { createConfigManager } from './lib/config.js';
 import { deliverToast } from './lib/toast.js';
 import {
@@ -45,11 +45,22 @@ import { listSounds, resolveSound } from './lib/sounds.js';
 import { normalizeSessionPath, parseSessionIdentity, resolveSessionTitleWithRetry } from './lib/session-title.js';
 import { codeMarker, createSessionMetaResolver, isCodeSession, pickSoundId, pickStyleId } from './lib/session-kind.js';
 import { createRefineModelConfig } from './lib/refine-model.js';
-import { buildNotificationCopy } from './lib/notification-copy.js';
+import { buildNotificationCopy, buildCasualCopy } from './lib/notification-copy.js';
 import { clipCodePoints } from './lib/text-clip.js';
 import { createFocusNotificationHandler, FOCUS_NOTIFY_SERVICE } from './lib/focus-notify.js';
 import { appendDebugLog, isDebugNoisyEvent } from './lib/debug-log.js';
 import { SessionParticipation } from './lib/session-participation.js';
+import {
+  parseCasualEntry,
+  isAgentCasualMessage,
+  casualEntryText,
+  CasualTurnTracker,
+  decideCasualNotify,
+  HostNoticeMemory,
+  CasualUnreadTracker,
+  CASUAL_MARKER,
+  CASUAL_SETTLE_MS
+} from './lib/casual-notify.js';
 
 export const name = 'tigexing-app';
 
@@ -74,6 +85,8 @@ export const toastDependencies = {
   waitDebt: null,
   // 补发静默期（毫秒）。null/未设=默认；测试可注入短值。
   deferredFlushGraceMs: null,
+  // 闲聊一轮气泡的结算窗口（毫秒）。null/未设=默认；测试可注入短值。
+  casualSettleMs: null,
   // 暂缓通知的回看间隔（毫秒）。null/未设=默认 15 秒；测试可注入短值。
   heldRetryMs: null,
   // 暂缓通知最多等几次；等超了带实情照样发，绝不丢。
@@ -92,6 +105,11 @@ export function resolveHanaHome(dataDir, installDir = INSTALL_DIR) {
 
 export async function apply(ctx) {
   if (!ctx?.dataDir) throw new Error('提个醒需要宿主提供应用数据目录');
+
+  // 把注入的依赖快照进本次实例的局部变量。
+  // 原来直接读模块级 toastDependencies：测试并行跑时，一个文件把依赖置空，
+  // 另一个文件正在跑就跟着失灵（表现为通知莫名不弹）。
+  const deps = { ...toastDependencies };
 
   const dataDir = ctx.dataDir;
   const log = ctx.logger;
@@ -127,6 +145,20 @@ export async function apply(ctx) {
   }
   const agentName = (id) => agentNames[id] || id;
 
+  /**
+   * 取伙伴显示名，拿不到名单时先把名单补上再取。
+   *
+   * 闲聊消息可能在名单拉回来之前就到（应用装载后才预热名单）：
+   * 那时直接取名字只会拿到原始 id（标题里出现「hanako」而不是「小花」）。
+   * 这里等一次名单，读完还是拿不到才退回 id。
+   */
+  async function agentNameFor(id) {
+    const known = agentNames[id];
+    if (known) return known;
+    await refreshAgents();
+    return agentNames[id] || id;
+  }
+
   // ── 运行时状态 ──
   const timers = new Map();
   const participation = new SessionParticipation({
@@ -134,10 +166,10 @@ export async function apply(ctx) {
     onError: (error) => dbg('参与记录保存/恢复失败：' + (error?.message || error))
   });
   dbg(`真实用户参与记录恢复 count=${participation.sessions.size}`);
-  const backgroundTasks = toastDependencies.backgroundTasks || new BackgroundTaskTracker();
+  const backgroundTasks = deps.backgroundTasks || new BackgroundTaskTracker();
   const deferredTurns = new DeferredTurns();
   // 「叫醒还欠着」单独记账与暂存：它和后台任务的收齐时机完全不同，混用会互相误取。
-  const waitDebt = toastDependencies.waitDebt || new WaitDebtTracker();
+  const waitDebt = deps.waitDebt || new WaitDebtTracker();
   // 待补发的回合：会话 id -> { timer, info }。静默期内开工则取消并丢弃。
   const pendingFlushes = new Map();
 
@@ -148,11 +180,24 @@ export async function apply(ctx) {
   // 不用「判定之后有没有开过工」：那样一旦开过工就永远判忙，缓下的通知再也发不出去。
   const turnStarts = new Map();
   const turnEnds = new Map();
+  // 每个会话最新一次「完成回合」的序号。
+  // 用来判暂缓的那条是不是已经被更新的回响顶掉了：
+  // 补发要走会话查询和文案润色，慢的时候这中间会来新回响，
+  // 光看「暂存表里还有没有」不够——新回响要等它自己走到发送那一步才会来清表。
+  const turnSeqBySession = new Map();
+  let turnSeq = 0;
 
+  /** 记下这个会话完成了一轮，返回这轮的序号 */
+  function noteTurnEnd(sessionId) {
+    const seq = ++turnSeq;
+    if (sessionId) turnSeqBySession.set(sessionId, seq);
+    return seq;
+  }
   /** 这个会话现在是不是还忙着；返回原因，空串表示闲着 */
   function sessionBusyReason(sessionId) {
     const start = turnStarts.get(sessionId) || 0;
     const end = turnEnds.get(sessionId) || 0;
+    dbg(`忙闲判定 session=${sessionId} start=${start} end=${end}`);
     if (start > end) return '窗口又开工';
     if (backgroundTasks.has(sessionId)) return '后台任务又开始';
     if (waitDebt.has(sessionId)) return '又在等后台结果';
@@ -167,18 +212,18 @@ export async function apply(ctx) {
   const HELD_MAX_TRIES = 20; // 15 秒 × 20 约 5 分钟
   const HELD_OVERDUE_NOTICE = '等太久了，先叫你一声';
   // 测试可以注入更短的回看间隔与更少的尝试次数，不必真等五分钟。
-  const heldRetryMs = Number(toastDependencies.heldRetryMs) > 0
-    ? Number(toastDependencies.heldRetryMs)
+  const heldRetryMs = Number(deps.heldRetryMs) > 0
+    ? Number(deps.heldRetryMs)
     : HELD_RETRY_MS;
-  const heldMaxTries = Number(toastDependencies.heldMaxTries) > 0
-    ? Number(toastDependencies.heldMaxTries)
+  const heldMaxTries = Number(deps.heldMaxTries) > 0
+    ? Number(deps.heldMaxTries)
     : HELD_MAX_TRIES;
 
-  function holdStaleToast({ sessionId, payload, reason, kind }) {
+  function holdStaleToast({ sessionId, payload, reason, kind, turnSeq }) {
     const previous = heldToasts.get(sessionId);
     if (previous?.timer) clearTimeout(previous.timer);
     if (previous) dbg(`暂缓的通知被后一条接替 session=${sessionId}`);
-    const hold = { sessionId, payload, reason, kind, tries: 0, timer: null };
+    const hold = { sessionId, payload, reason, kind, tries: 0, timer: null, turnSeq: turnSeq ?? 0 };
     heldToasts.set(sessionId, hold);
     dbg(`通知暂缓（${reason}），等窗口静下来再补 session=${sessionId} kind=${kind}`);
     scheduleHeldRetry(sessionId);
@@ -213,16 +258,29 @@ export async function apply(ctx) {
       scheduleHeldRetry(sessionId);
       return;
     }
-    heldToasts.delete(sessionId);
     // 等超了还没静：照样发，但把实情摆在正文末尾，不冒充「刚刚说完」。
     const overdue = Boolean(stale);
     const payload = overdue
       ? { ...hold.payload, body: withOverdueNotice(hold.payload.body) }
       : hold.payload;
     try {
+      // 发送前再确认一次：这轮是不是已经被更新的回响顶掉了。
+      // 之前只查「暂存表里还有没有」，但新回响要等它自己走到发送那一步才会来清表，
+      // 那之前旧条目就补发出去了 —— 结果两条都弹，
+      // 而且先弹的是上一轮的话（「中间汇报」），把「这才是结论」挤掉。
+      // 现在用完成回合的序号来判：序号比暂缓时新，说明有新回响，旧的让位。
+      const current = heldToasts.get(sessionId);
+      const latestSeq = turnSeqBySession.get(sessionId) || 0;
+      if (!current || current !== hold || (hold.turnSeq && latestSeq > hold.turnSeq)) {
+        dbg(`暂缓通知已被新回响接替，不再补发 session=${sessionId} tries=${hold.tries}`);
+        if (current === hold) heldToasts.delete(sessionId);
+        return;
+      }
+      heldToasts.delete(sessionId);
       const via = await notify(payload);
       dbg(`暂缓通知补发 session=${sessionId} tries=${hold.tries} overdue=${overdue} via=${via} title=${payload.title}`);
     } catch (error) {
+      heldToasts.delete(sessionId);
       dbg('暂缓通知补发失败：' + (error?.message || error));
     }
   }
@@ -232,8 +290,8 @@ export async function apply(ctx) {
     const room = Math.max(10, 24 - HELD_OVERDUE_NOTICE.length);
     return `${clipCodePoints(body, room)} ${HELD_OVERDUE_NOTICE}`;
   }
-  const flushGraceMs = Number(toastDependencies.deferredFlushGraceMs) > 0
-    ? Number(toastDependencies.deferredFlushGraceMs)
+  const flushGraceMs = Number(deps.deferredFlushGraceMs) > 0
+    ? Number(deps.deferredFlushGraceMs)
     : DEFERRED_FLUSH_GRACE_MS;
 
   // 只管定时器，不碰暂存：暂存的归属在 turn_start / 会话关闭那里统一处理。
@@ -302,7 +360,7 @@ export async function apply(ctx) {
   async function deliverNotification({ title, body, icon, sound, duration, style }) {
     return deliverToast({
       pluginDir: INSTALL_DIR, title, message: body, style, icon, sound, duration, log
-    }, (input) => ctx.notifications.show(input), { ...toastDependencies.dependencies, debug: dbg });
+    }, (input) => ctx.notifications.show(input), { ...deps.dependencies, debug: dbg });
   }
   async function notify(options) {
     return (await deliverNotification(options)).via;
@@ -481,14 +539,27 @@ export async function apply(ctx) {
       style: toastStyle === 'plain' ? 'plain' : 'icon'
     };
     if (stale) {
-      holdStaleToast({ sessionId: decision.sessionId, payload, reason: stale, kind: decision.kind });
+      holdStaleToast({
+        sessionId: decision.sessionId,
+        payload,
+        reason: stale,
+        kind: decision.kind,
+        turnSeq: decision.turnSeq
+      });
       return;
     }
 
     // 这一条成了新的回响，手里扣的旧消息就不再单独特发，免得两条撞在一起。
     dropHeldToast(decision.sessionId, '有更新的回响了');
     const via = await notify(payload);
-    dbg(`通知提交结果 session=${decision.sessionId} kind=${decision.kind} via=${via} title=${title}`);
+    // 两条腿都失败时 via 是 failed：这时要说清没弹出来，
+    // 不能只记一行「提交结果」让人以为提醒到了。
+    if (via === 'failed') {
+      dbg(`通知提交失败（两条腿都没成）session=${decision.sessionId} kind=${decision.kind} title=${title}`);
+      log?.error?.('[提个醒] 通知未送达', { sessionId: decision.sessionId, kind: decision.kind, title });
+    } else {
+      dbg(`通知提交结果 session=${decision.sessionId} kind=${decision.kind} via=${via} title=${title}`);
+    }
   }
 
   async function handleAbnormalAlert(alert) {
@@ -728,6 +799,8 @@ export async function apply(ctx) {
     const cfg = config.get();
     // 刷新配置但保留 Notifier 里的合并窗口状态，否则每轮都会把窗口清空
     notifier.config = cfg;
+    // 这一轮完成的序号：暂缓的通知靠它判断自己是不是被更新的回响顶掉了。
+    const turnSeqOfThisRound = noteTurnEnd(sessionId);
 
     const chatTrigger = resolveChatTrigger(cfg, agentId);
     if (!cfg.enabled || chatTrigger === 'never') {
@@ -769,9 +842,225 @@ export async function apply(ctx) {
       return;
     }
 
+    // 把这一轮的序号带上：暂缓的通知靠它判断自己是不是被更新的回响顶掉了。
+    decision.turnSeq = turnSeqOfThisRound;
     await doToast(decision, cfg.toastStyle);
     // 用 ?? 而不是 ||：0 是合法配置（不合并），|| 会把它当成假值兜回 30 秒。
     if (decision.kind === 'first') scheduleFlush(sessionId, cfg.mergeWindowMs ?? 30000);
+  }
+
+  // ── 闲聊（casual chat）提醒 ──
+  // 闲聊不走主会话的 turn_end：它的会话 namespace 是 casual，宿主自己就跳过了
+  // 「聊天回复完成」通知，伙伴在闲聊里是用 chat_say 工具发言的。
+  // 真正带着内容的是 casual_entry 事件，这里接它。
+  const casualTurns = new CasualTurnTracker();
+  const hostNotices = new HostNoticeMemory();
+  // 语音回复在宿主那边不投 casual_entry，只发 casual_unread。
+  // 这里把它认出来，否则语音的发言就完全收不到。
+  const casualUnread = new CasualUnreadTracker();
+  // 一个伙伴一轮里的多条气泡先攒着，攒齐了再发一条提醒。
+  const casualPending = new Map();
+  // 闲聊这一轮的窗口：同时管「相邻气泡算不算同一轮」和「攒多久才发」。
+  // 两个是同一个数——分成两个会出事：结算窗口比同轮间隔短，一句话就被拆成好几条弹窗。
+  const casualWindowMs = Number(deps.casualSettleMs) > 0
+    ? Number(deps.casualSettleMs)
+    : CASUAL_SETTLE_MS;
+  casualTurns.setWindow(casualWindowMs);
+
+  function casualKey(parsed) {
+    return `${parsed.studioId || 'studio'}:${parsed.agentId}`;
+  }
+
+  function flushCasualPending(key) {
+    const pending = casualPending.get(key);
+    if (!pending) return;
+    casualPending.delete(key);
+    // 记下这轮已经提醒过：这一轮后面再来的气泡不再弹第二条。
+    casualTurns.markNotified(key, pending.turnId);
+    // 异常要落日志：这条链是异步的，抛出去就只剩「没弹窗」这个现象，
+    // 查起来只能靠日志。宁可多一行报错，也不能让提醒不明不白地没出来。
+    sendCasualNotification(key, pending).catch((error) => {
+      dbg('闲聊提醒发送失败：' + (error?.stack || error?.message || error));
+      log?.error?.('[提个醒] 闲聊提醒发送失败', { error: error?.message || error });
+    });
+  }
+
+  async function sendCasualNotification(key, pending) {
+    const cfg = config.get();
+    if (!cfg.enabled) {
+      dbg('闲聊提醒跳过：总开关关闭');
+      return;
+    }
+    const { mode, agentId, texts } = pending;
+    const decision = decideCasualNotify({ trigger: cfg.casualTrigger, mode });
+    if (!decision.notify) {
+      dbg(`闲聊提醒跳过：档位 ${decision.reason} mode=${mode} agent=${agentId}`);
+      return;
+    }
+    if (isInQuietHours(cfg)) {
+      dbg('闲聊提醒跳过：静默时段');
+      return;
+    }
+    // 本体若也在提醒同一句，别弹两遍。宿主本体那条只在「不聚焦」时弹，
+    // 它弹了才轮到我们退让。
+    if (hostNotices.covers(agentId, texts, { hostShown: !(await isHanaFocused()) })) {
+      dbg('闲聊提醒跳过：宿主已提醒同一句');
+      return;
+    }
+
+    // 名字用 displayName：写成 const agentName = agentName(...) 会自引用报错，
+    // 而这里的异常是异步链上的，丢了就只剩「没弹窗」这个现象。
+    const displayName = await agentNameFor(agentId);
+    const fullText = texts.join(' ');
+    const snippet = makeSnippet(fullText);
+    const style = getStyle(pickStyleId({
+      inCode: false,
+      agentId,
+      codeStyles: cfg.agentCodeStyles,
+      styles: cfg.agentStyles
+    }));
+    const copy = await buildCasualCopy({
+      enabled: cfg.refineEnabled,
+      modelConfig: refineModelConfig,
+      style,
+      agentName: displayName,
+      snippet,
+      refineText: fullText,
+      mode
+    });
+    if (copy.refineError) {
+      dbg('闲聊文案润色失败，回退规则版：' + (copy.refineError?.message || copy.refineError));
+    }
+    const title = CASUAL_MARKER + copy.title;
+    const body = copy.body;
+    dbg('闲聊通知文案 ' + JSON.stringify({
+      style: style.id, refined: copy.refined, mode, agentId,
+      inputChars: fullText.length, snippet, body
+    }));
+
+    let avatar = APP_ICON;
+    try {
+      avatar = await resolveAgentAvatar(agentsHome, agentId, { resources: ctx.resources }) || APP_ICON;
+    } catch (error) {
+      dbg('闲聊提醒头像读取失败：' + (error?.message || error));
+    }
+
+    const soundCfg = pickSoundId({
+      inCode: false,
+      agentId,
+      codeSounds: cfg.agentCodeSounds,
+      sounds: cfg.agentSounds
+    });
+    let sound;
+    if (soundCfg === 'silent') sound = 'silent';
+    else if (soundCfg && soundCfg !== 'default') {
+      sound = resolveSound(dataDir, soundCfg, cfg.soundDir, { allowExternal: !!cfg.soundDir }) || undefined;
+      if (sound && cfg.soundDir) {
+        try {
+          const stat = await ctx.resources.stat({ kind: 'local-file', path: sound });
+          if (!stat?.exists || stat.isDirectory) sound = undefined;
+        } catch (error) {
+          dbg('闲聊提醒音效读取未获授权或文件不可用：' + (error?.message || error));
+          sound = undefined;
+        }
+      }
+    }
+
+    const via = await notify({
+      title,
+      body,
+      icon: avatar || undefined,
+      sound,
+      duration: cfg.toastDuration,
+      style: 'icon'
+    });
+    if (via === 'failed') {
+      dbg(`闲聊通知提交失败（两条腿都没成）agent=${agentId} mode=${mode} title=${title}`);
+      log?.error?.('[提个醒] 闲聊提醒未送达', { agentId, mode, title });
+    } else {
+      dbg(`闲聊通知提交结果 agent=${agentId} mode=${mode} via=${via} title=${title}`);
+    }
+  }
+
+  /**
+   * 处理一条解析好的闲聊发言。
+   *
+   * @param {object} parsed parseCasualEntry 的结果
+   * @param {{fromFallback?:boolean}} options fromFallback=true 表示这条是
+   *   兜底（casual_unread）认出来的，不是宿主发的 casual_entry。
+   */
+  function handleCasualEntry(parsed, { fromFallback = false } = {}) {
+    if (!parsed) return;
+    const key = casualKey(parsed);
+    if (parsed.actor === 'user') {
+      // 她在闲聊里说了话：记一笔，下一条伙伴消息就是回她的话。
+      casualTurns.noteUserMessage(key);
+      // 兜底靠这个时刻分辨「面板里最新那条是她说的还是伙伴说的」。
+      casualUnread.noteUserEntry(key, Date.parse(parsed.occurredAt || '') || 0);
+      return;
+    }
+    if (!isAgentCasualMessage(parsed)) return;
+    const text = casualEntryText(parsed.item).trim();
+    if (!text) return;
+    const occurredAt = Date.parse(parsed.occurredAt || '') || 0;
+    if (fromFallback) {
+      // 兜底认下的这条，登记已处理时刻就行。
+      casualUnread.noteHandledAt(key, occurredAt);
+    } else {
+      const covered = casualUnread.noteAgentEntry(key, occurredAt, text);
+      if (covered.covered) {
+        // 兜底已经弹过这条了，别再弹一遍。
+        dbg(`闲聊气泡已由未读兜底提醒过，跳过 agent=${parsed.agentId}`);
+        return;
+      }
+    }
+    const turn = casualTurns.noteAgentMessage(key);
+    if (casualTurns.isNotified(key, turn.turnId)) {
+      // 这一轮已经提醒过了，后面再来的气泡不再弹第二条。
+      dbg(`闲聊气泡已提醒过，跳过 agent=${parsed.agentId} turn=${turn.turnId}`);
+      return;
+    }
+
+    let pending = casualPending.get(key);
+    if (pending && pending.turnId !== turn.turnId) {
+      // 上一轮还没发出去，新一轮就开始了：上一轮先发，不能被覆盖丢掉。
+      flushCasualPending(key);
+      pending = null;
+    }
+    if (!pending) {
+      pending = { agentId: parsed.agentId, mode: turn.mode, turnId: turn.turnId, texts: [] };
+      casualPending.set(key, pending);
+    }
+    pending.texts.push(text);
+    // 同一轮的后续气泡并进同一条；新的一轮重新起一条。
+    if (pending.timer) clearTimeout(pending.timer);
+    pending.timer = setTimeout(() => flushCasualPending(key), casualWindowMs);
+    pending.timer.unref?.();
+    dbg(`闲聊气泡 agent=${parsed.agentId} mode=${turn.mode} first=${turn.first} text=${text.slice(0, 40)}`);
+  }
+
+  /**
+   * 兜底：认那些没走 casual_entry 的发言（实机：语音回话只发 casual_unread）。
+   *
+   * 认的依据是「伙伴未读条数涨了」+「预览比已处理的更新」，
+   * 两条一起才认，避免把她自己的发言、或者已经弹过的那条再认一遍。
+   */
+  function handleCasualUnread(event) {
+    const agentId = String(event?.agentId || '').trim();
+    if (!agentId) return;
+    const key = `${event?.studioId || 'studio'}:${agentId}`;
+    const found = casualUnread.observeUnread(key, event);
+    if (!found) return;
+    dbg(`闲聊兜底：未收到 casual_entry 的发言 agent=${agentId} text=${found.text.slice(0, 40)}`);
+    handleCasualEntry({
+      agentId,
+      studioId: String(event?.studioId || ''),
+      entryId: `unread:${found.at}`,
+      actor: 'agent',
+      itemKind: 'voice',
+      item: { kind: 'voice', text: found.text },
+      occurredAt: found.occurredAt,
+    }, { fromFallback: true });
   }
 
   // ── 订阅总线 ──
@@ -786,6 +1075,22 @@ export async function apply(ctx) {
         // 宿主活动通知（计划任务 / 巡检完成这类）先记账，稍后按活动会话去重
         if (et === 'notification') {
           activityNotifications.mark(sessionPath || event?.sessionFile || event?.sessionPath);
+          // 闲聊本体提醒也走这个事件：记一笔，好判断是不是同一句、别弹两遍。
+          hostNotices.note(event);
+          return;
+        }
+
+        // 闲聊窗口的消息：伙伴在闲聊里是用 chat_say 工具发言的，
+        // 主会话的 turn_end 拿不到，这里接 casual_entry。
+        if (et === 'casual_entry') {
+          handleCasualEntry(parseCasualEntry(event));
+          return;
+        }
+
+        // 语音回话在宿主那边不投 casual_entry，只发 casual_unread。
+        // 这里接住，不然语音的发言就收不到。
+        if (et === 'casual_unread') {
+          handleCasualUnread(event);
           return;
         }
 
@@ -893,7 +1198,18 @@ export async function apply(ctx) {
           if (sid) {
             // 记下开工时刻：完成提醒在发出去之前要拿它比对，避免把上一轮的「回你啦」
             // 拖到这一轮才弹出来。
-            turnStarts.set(sid, Date.now());
+            const startAt = Date.now();
+            turnStarts.set(sid, startAt);
+            // 新一轮开工了，上一轮的收工记录就该作废。
+            //
+            // 不作废会出这样的事（实机 2026-10-30）：先收工、紧接着又开工，
+            // 两个事件落在同一毫秒，start 和 end 相等，
+            // 而「忙」是按 start > end 判的——相等就不忙，
+            // 于是把上一轮的「中间汇报」当成收尾直接弹出去，
+            // 真正那句「这才是结论」也跟着弹，两条撞在一起。
+            //
+            // 靠时间戳分不出同一毫秒里的先后，靠「开工之后还没有新的收工」才分得清。
+            if ((turnEnds.get(sid) || 0) <= startAt) turnEnds.delete(sid);
             // 收齐后的静默期内又开工 = 那不是收尾，补发作废。
             cancelPendingFlush(sid, '窗口又开工');
             // 被压住的那句已经确认是过程，不补发也不堆在内存里。
