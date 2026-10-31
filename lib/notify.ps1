@@ -2,6 +2,11 @@
 # 首次运行自动注册 AppUserModelID（快捷方式 + 注册表显示名），
 # 之后直接发 toast。标题/正文通过环境变量 TXS_TITLE / TXS_MSG 传入，无注入风险。
 # 方案源自歇一会插件（验证过的生产方案），改 AUMID 与显示名为「提个醒」。
+# -RegisterOnly：只跑注册不发通知，供启动预热用。
+
+param(
+    [switch]$RegisterOnly
+)
 
 $ErrorActionPreference = "Stop"
 
@@ -147,6 +152,12 @@ if (Test-Path $appIcon) {
 }
 
 # ── 发送 toast ──
+# 只注册不发送：启动预热跑这一遍，别等第一条通知才撞上最容易失败的首次注册。
+if ($RegisterOnly) {
+    [Console]::Out.WriteLine("TXS_REGISTERED")
+    exit 0
+}
+
 [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
 [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
 $t = [Environment]::GetEnvironmentVariable("TXS_TITLE", "Process")

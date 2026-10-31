@@ -18,6 +18,10 @@
     --code-accent: #5C7FA6;
     --code-deep: #47688C;
     --code-soft: #EEF3F9;
+    /* 闲聊窗口那屏的配色：藕荷，跟另外两屏都不同 */
+    --casual-accent: #B07AA8;
+    --casual-deep: #8E5A87;
+    --casual-soft: #F7EEF5;
     --pink: #E89BB0;          /* 樱花粉点缀 */
     --pink-soft: #FBEDF1;
     --line: rgba(93,122,107,.20);
@@ -32,13 +36,21 @@
   *::-webkit-scrollbar-thumb{background:#c9dfd3;border-radius:99px;border:2px solid var(--bg)}
   *::-webkit-scrollbar-thumb:hover{background:var(--accent)}
   *{scrollbar-width:thin;scrollbar-color:#c9dfd3 transparent}
+  html, body { min-height: 100%; }
   body {
     background: var(--bg); color: var(--ink);
     font-family: "LXGW WenKai", "霞鹜文楷", "Kaiti SC", "KaiTi", "Microsoft YaHei", serif;
-    padding: 22px 18px 40px; max-width: 720px; margin: 0 auto;
+    margin: 0; padding: 0;
     background-image: radial-gradient(circle at 12% 8%, rgba(93,174,142,.14) 0, transparent 110px),
                       radial-gradient(circle at 90% 24%, rgba(232,155,176,.12) 0, transparent 120px);
   }
+  /* ── 主内容区：导航在 Hana 的功能面板里（nav.html），这里只放当前那一屏 ── */
+  main.content { padding: 22px 20px 44px; min-width: 0; }
+  .pane { max-width: 760px; margin: 0 auto; }
+  .pane[hidden] { display: none; }
+  .pane-lead { margin: 0 0 16px; padding-left: 2px; }
+  .pane-lead h1 { font-size: 20px; font-weight: 600; margin-bottom: 5px; letter-spacing: .01em; }
+  .pane-lead p { font-size: 13.5px; color: var(--ink-soft); line-height: 1.75; font-family: "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif; }
   .card {
     background: var(--card); border: 1px solid var(--line-soft); border-radius: 20px;
     padding: 18px 18px 16px; margin-bottom: 16px;
@@ -125,6 +137,7 @@
   .snd-mode-switch button[aria-selected="true"] { color: #fff; }
   .snd-mode-switch button[data-mode="chat"][aria-selected="true"] { background: var(--accent); }
   .snd-mode-switch button[data-mode="code"][aria-selected="true"] { background: var(--code-accent); }
+  .snd-mode-switch button[data-mode="casual"][aria-selected="true"] { background: var(--casual-accent); }
   .snd-mode-note {
     font-size: 13.5px; line-height: 1.6; padding: 11px 13px; border-radius: 12px;
     margin-bottom: 10px; border: 1px solid transparent;
@@ -134,6 +147,9 @@
   }
   .snd-mode-note[data-mode="code"] {
     background: var(--code-soft); color: var(--code-deep); border-color: rgba(92, 127, 166, .28);
+  }
+  .snd-mode-note[data-mode="casual"] {
+    background: var(--casual-soft); color: var(--casual-deep); border-color: rgba(176, 122, 168, .28);
   }
   .snd-mode-note b { font-weight: 700; }
 
@@ -149,6 +165,25 @@
   #snd-list[data-mode="code"] .snd-head,
   #snd-list[data-mode="code"] .snd-row {
     grid-template-columns: minmax(60px, .8fr) minmax(116px, 1.15fr) minmax(106px, 1.05fr) minmax(132px, auto);
+  }
+  #snd-list[data-mode="casual"] .snd-head,
+  #snd-list[data-mode="casual"] .snd-row {
+    grid-template-columns: minmax(60px, .8fr) minmax(116px, 1.15fr) minmax(106px, 1.05fr) minmax(132px, auto);
+  }
+  /* 闲聊屏整块换个底色（藕荷），三屏一眼分得开 */
+  #snd-list[data-mode="casual"] {
+    background: var(--casual-soft); border: 1px solid rgba(176, 122, 168, .22);
+    border-radius: 14px; padding: 2px 12px 4px; margin-top: 2px;
+  }
+  #snd-list[data-mode="casual"] .snd-head { color: var(--casual-deep); }
+  #snd-list[data-mode="casual"] .snd-row { border-bottom-color: rgba(176, 122, 168, .16); }
+  #snd-list[data-mode="casual"] .dd.dd-follow .dd-trigger {
+    color: var(--casual-deep); font-weight: 600; background: #fff;
+    border-style: dashed; border-color: rgba(176, 122, 168, .5);
+  }
+  /* 闲聊只有主助手参与，那一屏就一行，下面这句说明用同一色系 */
+  #snd-list[data-mode="casual"] .casual-solo-hint {
+    font-size: 13px; line-height: 1.6; color: var(--casual-deep); padding: 12px 2px;
   }
   /* Code 屏整块换个底色，和聊天那屏分开 */
   #snd-list[data-mode="code"] {
@@ -244,6 +279,11 @@
 /* 面板溢出容器时提升该容器层级（组件 JS 展开时自动加类，收起时移除），防止下层内容穿模 */
 .dd-open-card { position: relative; z-index: 30; }
 
+  @media (max-width: 820px) {
+    main.content { padding: 16px 14px 32px; }
+    .pane-lead h1 { font-size: 18px; }
+  }
+
   @media (max-width: 620px) {
     .seg-inline { flex-direction: column; }
     .seg-inline .seg-btn { flex: none; width: 100%; text-align: left; }
@@ -259,6 +299,7 @@
     .snd-row .snd-actions { grid-column: 1 / -1; justify-self: start; width: 100%; }
     /* 窄屏时 Code 屏只有四列，两列排就够 */
     #snd-list[data-mode="code"] .snd-row .dd[data-kind="codeSound"] { grid-column: 1 / -1; }
+    #snd-list[data-mode="casual"] .snd-row .dd[data-kind="casualSound"] { grid-column: 1 / -1; }
     .snd-row .snd-actions .mini { width: auto; }
   }
   .tip-line { font-size: 13.5px; color: var(--ink-soft); min-height: 20px; margin-top: 9px; font-family: "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif; }
@@ -595,12 +636,47 @@
   .support-feedback-btn { display:flex; align-items:center; justify-content:center; gap:7px; }
   .support-entry-icon { width:18px; height:18px; flex-shrink:0; }
   @media (max-width: 420px) { .support-actions { grid-template-columns:1fr; } .support-actions .support-feedback-btn { grid-column:auto; } }
+
+  /* 通知外壳横幅：通知被宿主接管时提一句，修好之后自动消失 */
+  .toast-shell-banner {
+    display: flex; gap: 12px; align-items: flex-start; justify-content: space-between;
+    max-width: 760px; margin: 0 auto 14px; padding: 12px 14px;
+    border: 1px solid var(--warn, #d9a15b); border-radius: 12px;
+    background: var(--warn-soft, #fbf3e4);
+    font-size: 12.5px; line-height: 1.72;
+  }
+  .toast-shell-banner[hidden] { display: none; }
+  .toast-shell-text { min-width: 0; }
+  .toast-shell-text b { display: block; font-size: 13px; margin-bottom: 3px; }
+  .toast-shell-text span { color: var(--ink-soft); }
+  .toast-shell-actions { display: flex; gap: 6px; flex-shrink: 0; }
+  @media (max-width: 520px) {
+    .toast-shell-banner { flex-direction: column; }
+    .toast-shell-actions { width: 100%; justify-content: flex-end; }
+  }
 </style>
 </head>
 <body>
 
-<body>
-  
+<main class="content">
+
+<div class="toast-shell-banner" id="toast-shell-banner" hidden>
+  <div class="toast-shell-text">
+    <b id="toast-shell-title"></b>
+    <span id="toast-shell-hint"></span>
+  </div>
+  <div class="toast-shell-actions">
+    <button type="button" class="mini" id="toast-shell-more">怎么修</button>
+    <button type="button" class="mini" id="toast-shell-dismiss">知道了</button>
+  </div>
+</div>
+
+<section class="pane" data-pane="notify">
+  <div class="pane-lead">
+    <h1>提醒时机</h1>
+    <p>什么时候弹、弹多久。聊天回复、闲聊、断联、计划任务、巡检各走各的档位，互不影响。</p>
+  </div>
+
   <div class="card" style="border-color:var(--warn);background:var(--warn-soft)">
     <h2>小提示</h2>
     <div class="hint">提个醒现在接管 <b>聊天回复、闲聊窗口消息、模型异常中断、计划任务和巡检完成</b>五类提醒。为避免聊天回复双弹，可以把 Hana 设置里「聊天回复完成」那条原版通知设为「从不」。计划任务和巡检都会留一点时间识别 Hana 原版通知；检测到同一活动已有原版通知时，提个醒就跳过补弹。</div>
@@ -689,12 +765,21 @@
     </div>
   </div>
 
+  </section>
+
+<section class="pane" data-pane="sound" hidden>
+  <div class="pane-lead">
+    <h1>谁的声音</h1>
+    <p>谁在说话、哪一扇窗口，决定这条提醒长什么样。聊天、Code、闲聊三套分开配，互不干扰。</p>
+  </div>
+
   <div class="card">
     <h2>按助手个性化</h2>
-    <div class="hint" style="margin-bottom:10px">下面分两屏：<b>聊天窗口</b>是日常聊天用的那一套，<b>Code 窗口</b>是代码窗口跑完时用的那一套。点上面的按钮切，切到哪屏就在配哪屏，两屏颜色不一样，不会搞混。</div>
+    <div class="hint" style="margin-bottom:10px">下面分三屏：<b>聊天窗口</b>是日常聊天用的那一套，<b>Code 窗口</b>是代码窗口跑完时用的那一套，<b>闲聊窗口</b>是侧边栏闲聊用的那一套。点上面的按钮切，切到哪屏就在配哪屏，三屏颜色不一样，不会搞混。</div>
     <div class="snd-mode-switch" id="snd-mode-switch">
       <button type="button" data-mode="chat" aria-selected="true">聊天窗口</button>
       <button type="button" data-mode="code" aria-selected="false">Code 窗口</button>
+      <button type="button" data-mode="casual" aria-selected="false">闲聊窗口</button>
     </div>
     <div class="snd-mode-note" id="snd-mode-note"></div>
     <div class="hint" style="margin-bottom:8px">🎁 方言风格和「学我说话」<b>这一版暂时用不了</b>：它们原本靠表情包联动挂载，表情包换形态后路径对不上，所以风格列表里暂时不会出现这两类，以后修。其他风格照常。</div>
@@ -714,6 +799,14 @@
     </div>
     <div id="hidden-list" style="display:none" class="hidden-agents-box"></div>
     <div id="snd-list"></div>
+  </div>
+
+  </section>
+
+<section class="pane" data-pane="copy" hidden>
+  <div class="pane-lead">
+    <h1>怎么说</h1>
+    <p>可选项：让模型把通知的标题和正文改得更像人说的话。默认关闭，开了会慢一两秒。</p>
   </div>
 
   <div class="card">
@@ -758,6 +851,14 @@
     </div>
   </div>
 
+  </section>
+
+<section class="pane" data-pane="quiet" hidden>
+  <div class="pane-lead">
+    <h1>别吵我</h1>
+    <p>定一段时间，所有通知都安静下来。适合睡觉、开会、不想被打断的时候。</p>
+  </div>
+
   <div class="card">
     <h2>静默时段</h2>
     <div class="btn-row" style="justify-content:space-between;margin-bottom:10px">
@@ -773,6 +874,14 @@
       <input type="time" id="in-qend" value="08:00">
       <span class="hint">（支持跨午夜）</span>
     </div>
+  </div>
+
+  </section>
+
+<section class="pane" data-pane="about" hidden>
+  <div class="pane-lead">
+    <h1>关于</h1>
+    <p>版本号、检查更新、反馈入口。用着不对劲时，从这里把问题递过来。</p>
   </div>
 
   <div class="card support-card">
@@ -791,9 +900,14 @@
       </button>
     </div>
   </div>
+  <div class="footer">提个醒 · moononnn &amp; 小花</div>
+
+</section>
+
+</main>
+
   <button type="button" class="tg-feedback-open" id="fb-open-btn">反馈</button><div class="tg-feedback-modal" id="fb-modal" hidden role="dialog" aria-modal="true" aria-labelledby="fb-modal-title"><div class="tg-feedback-backdrop" data-fb-close></div><div class="tg-feedback-dialog"><div class="tg-feedback-head"><div class="tg-feedback-titles"><span class="tg-feedback-title" id="fb-modal-title">反馈小助手</span><span class="tg-feedback-sub">想说啥用大白话讲，它帮你整理成规范反馈</span></div><button type="button" class="tg-feedback-close" data-fb-close aria-label="关闭反馈窗口">×</button></div><div class="tg-feedback-messages" id="fb-messages"></div><div class="tg-feedback-preview" id="fb-issue-preview" hidden></div><div class="tg-feedback-input-row"><textarea id="fb-input" placeholder="比如：更新完设置就打不开了…" rows="2"></textarea><button type="button" class="tg-feedback-send" id="fb-send-btn">发送</button></div><div class="tg-feedback-actions" id="fb-actions" hidden><a class="tg-feedback-btn tg-feedback-btn-primary" id="fb-submit-link" target="_blank" rel="noopener" hidden>生成提交页</a><button type="button" class="tg-feedback-btn" id="fb-copy-btn">复制文案</button><span class="tg-feedback-actions-hint" id="fb-actions-hint">检查整理好的内容后再提交</span></div></div></div>
 
-  <div class="footer">提个醒 · moononnn & 小花</div>
   <div class="flash" id="flash" role="status"></div>
 
 <script>
@@ -1373,6 +1487,50 @@ function boot() {
     return window.hana.api.fetch(cleanPath, request);
   }
 
+  // ── 分屏：导航在 Hana 的功能面板（nav.html），这里只负责换屏 ──
+  // 原来所有卡片堆成一长条，设置一多就得上下翻。现在一屏一件事，
+  // 各页还是同一份 DOM，只切 hidden，控件和已绑的事件都不动。
+  (function bindPanes() {
+    var panes = Array.prototype.slice.call(document.querySelectorAll(".pane[data-pane]"));
+    if (!panes.length) return;
+    var KEY = "tigexingPane";
+    var CHANNEL = "tigexing-panel-view";
+    var channel = ("BroadcastChannel" in window) ? new BroadcastChannel(CHANNEL) : null;
+
+    function show(name) {
+      var hit = false;
+      panes.forEach(function (pane) {
+        var on = pane.dataset.pane === name;
+        if (on) hit = true;
+        pane.hidden = !on;
+      });
+      if (!hit) return false;
+      try { localStorage.setItem(KEY, name); } catch (e) { /* 存不了就算 */ }
+      window.scrollTo(0, 0);
+      return true;
+    }
+
+    // 左栏面板点了一下
+    if (channel) {
+      channel.addEventListener("message", function (event) {
+        var pane = event.data && event.data.pane;
+        if (typeof pane === "string" && pane) show(pane);
+      });
+    }
+    // BroadcastChannel 被宿主裁掉时，靠 postMessage 兜底
+    window.addEventListener("message", function (event) {
+      if (event.data && event.data.type === "tigexing-pane" && typeof event.data.pane === "string") {
+        show(event.data.pane);
+      }
+    });
+
+    var saved = "";
+    try { saved = localStorage.getItem(KEY) || ""; } catch (e) { /* 读不到就默认 */ }
+    var initial = show(saved) ? saved : (show("notify") ? "notify" : "");
+    // 告诉左栏面板现在停在哪一屏（它可能比这边晚加载）
+    try { window.parent?.postMessage({ type: "tigexing-pane-state", pane: initial }, "*"); } catch (e) { /* 忽略 */ }
+  })();
+
   function api(path, init) {
     return rawApi(path, init).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (data) {
@@ -1390,6 +1548,44 @@ function boot() {
     var el = document.getElementById(id);
     if (el) el.addEventListener(evt, fn);
   }
+
+  // ── 通知外壳横幅 ──
+  // 提个醒自己的通知（标题栏「提个醒」+ 伙伴头像）靠它能起 PowerShell；
+  // 起不来就静默换成 Hana 本体代发，外面完全看不出来。这里只在真的降级过
+  // 之后提一句，并告诉人往哪修。恢复走自己的通道后后端不再报，横幅自己消失。
+  (function bindToastShellBanner() {
+    var box = document.getElementById("toast-shell-banner");
+    if (!box) return;
+    var titleEl = document.getElementById("toast-shell-title");
+    var hintEl = document.getElementById("toast-shell-hint");
+    var moreBtn = document.getElementById("toast-shell-more");
+    var dismissBtn = document.getElementById("toast-shell-dismiss");
+    var DISMISS_KEY = "tigexingShellDismissedAt";
+    function remember() {
+      try { return localStorage.getItem(DISMISS_KEY) || ""; } catch (e) { return ""; }
+    }
+    api("/api/toast-status").then(function (r) {
+      var notice = r && r.notice;
+      if (!notice) return;
+      var key = String(notice.at || "");
+      // 同一次降级只提醒一次，别每次开设置页都拦一道
+      if (key && key === remember()) return;
+      if (titleEl) titleEl.textContent = notice.title || "通知换成了 Hana 本体代发";
+      if (hintEl) {
+        hintEl.textContent = "修好之前通知照样会弹，只是没有伙伴头像和专属音效。";
+        hintEl.dataset.full = notice.hint || "";
+      }
+      box.hidden = false;
+      if (moreBtn) moreBtn.addEventListener("click", function () {
+        if (hintEl) hintEl.textContent = hintEl.dataset.full || "";
+        moreBtn.hidden = true;
+      });
+      if (dismissBtn) dismissBtn.addEventListener("click", function () {
+        box.hidden = true;
+        if (key) { try { localStorage.setItem(DISMISS_KEY, key); } catch (e) { /* 存不了就算了 */ } }
+      });
+    }).catch(function () { /* 横幅只是辅助，取不到就不出 */ });
+  })();
 
   function showTip(id, text, ms) {
     var el = document.getElementById(id);
@@ -1451,7 +1647,9 @@ function boot() {
     var btn = document.getElementById("btn-test-notify");
     var tip = document.getElementById("test-notify-tip");
     if (btn) { btn.disabled = true; btn.textContent = "发送中…"; }
-    api("/api/test-notify", { method: "POST" })
+    // 开了文案润色时后端要等模型（预算 30 秒），默认 8 秒会先被前端搐断：
+    // 页面报「请求失败」，通知却照样弹。这两条路单独放宽到 30 秒。
+    api("/api/test-notify", { method: "POST", signal: AbortSignal.timeout(30000) })
       .then(function (r) {
         if (tip) tip.textContent = r && r.ok && r.sent ? "已提交给系统，留意实际弹窗" : "失败：" + ((r && r.error) || "看 Hana 日志");
       })
@@ -1557,7 +1755,7 @@ function boot() {
   }
 
   // ── 按助手个性化（风格 + 音效） ──
-  var sndData = { files: [], agents: [], assignments: {}, styleAssignments: {}, triggerAssignments: {}, codeAssignments: {}, codeStyleAssignments: {}, styles: [], agentsError: "" };
+  var sndData = { files: [], agents: [], assignments: {}, styleAssignments: {}, triggerAssignments: {}, codeAssignments: {}, codeStyleAssignments: {}, casualAssignments: {}, casualStyleAssignments: {}, primaryAgent: "", styles: [], agentsError: "" };
   var esc = function (s) {
     return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   };
@@ -1567,6 +1765,9 @@ function boot() {
   // Code 窗口：没配就是空串 = 跟随普通窗口（默认状态，用户不碰就不用管）
   var codeSndVal = function (a) { return sndData.codeAssignments[a.id] || ""; };
   var codeStyleVal = function (a) { return sndData.codeStyleAssignments[a.id] || ""; };
+  // 闲聊窗口：口径同 Code，没配就是空串 = 跟随聊天窗口
+  var casualSndVal = function (a) { return sndData.casualAssignments[a.id] || ""; };
+  var casualStyleVal = function (a) { return sndData.casualStyleAssignments[a.id] || ""; };
   // 提醒时机：default=跟随全局；其余四档按助手覆盖（聊天回复完成档）
   var TRIGGER_OPTIONS = [
     ["default", "跟随全局"],
@@ -1591,6 +1792,11 @@ function boot() {
   // Code 窗口的风格表：第一项是「跟随普通窗口」，选了就把该助手的单独设置删掉
   function codeStyleOptions(a) {
     return buildStyleOptions(codeStyleVal(a) || "", '跟随聊天窗口');
+  }
+
+  // 闲聊窗口：同样第一项跟随聊天窗口
+  function casualStyleOptions(a) {
+    return buildStyleOptions(casualStyleVal(a) || "", '跟随聊天窗口');
   }
 
   function buildStyleOptions(current, followLabel) {
@@ -1628,6 +1834,10 @@ function boot() {
     return buildSoundOptions(codeSndVal(a) || "", '跟随聊天窗口');
   }
 
+  function casualSoundOptions(a) {
+    return buildSoundOptions(casualSndVal(a) || "", '跟随聊天窗口');
+  }
+
   function buildSoundOptions(current, followLabel) {
     var opts = "";
     if (followLabel) {
@@ -1643,20 +1853,25 @@ function boot() {
     return opts;
   }
 
-  // ── 两屏：聊天窗口 / Code 窗口 ──
-  // 原先想做一张宽表把两套并排，实际用了七个下拉挤一行，字全截成「古风…」「跟随普…」，
-  // 看不清等于没配。所以拆成两屏：上面一个切换按钮，切过去就换整套表格和配色。
+  // ── 三屏：聊天窗口 / Code 窗口 / 闲聊窗口 ──
+  // 原先想做一张宽表把几套并排，实际用了七个下拉挤一行，字全截成「古风…」「跟随普…」，
+  // 看不清等于没配。所以拆成屏：上面切换按钮，切过去就换整套表格和配色。
+  // 闲聊那屏只有主助手参与（Hana 的闲聊只接主助手），所以只渲染它一行。
   var sndMode = "chat";
 
   function sndModeNoteText() {
-    return sndMode === "code"
-      ? "<b>Code 窗口的提醒</b>：代码窗口跑完一轮时弹出的那条，标题前面会带「〔Code〕」记号，跟聊天窗口一眼分得开。默认全是「跟随聊天窗口」，只改这里不会动聊天那边；提醒时机跟聊天窗口保持一致。"
-      : "<b>聊天窗口的提醒</b>：伙伴在普通对话里回完一轮时弹出的那条。风格只改标题语气和正文包装，正文永远是伙伴原话；音效用你放进音效文件夹里的音频；提醒时机只影响「聊天回复完成」，选「跟随全局」就用上面的全局档位。";
+    if (sndMode === "code") {
+      return "<b>Code 窗口的提醒</b>：代码窗口跑完一轮时弹出的那条，标题前面会带「〔Code〕」记号，跟聊天窗口一眼分得开。默认全是「跟随聊天窗口」，只改这里不会动聊天那边；提醒时机跟聊天窗口保持一致。";
+    }
+    if (sndMode === "casual") {
+      return "<b>闲聊窗口的提醒</b>：你在侧边栏闲聊里收到的那些气泡，标题前面会带「〔闲聊〕」记号。默认「跟随聊天窗口」；这一屏只有主助手能把话说到闲聊里，所以只有它一行能调，其他伙伴调了也不生效。";
+    }
+    return "<b>聊天窗口的提醒</b>：伙伴在普通对话里回完一轮时弹出的那条。风格只改标题语气和正文包装，正文永远是伙伴原话；音效用你放进音效文件夹里的音频；提醒时机只影响「聊天回复完成」，选「跟随全局」就用上面的全局档位。";
   }
 
   // 「跟随聊天窗口」存的是空值，用虚边框标出来，让人知道那不是真选了某一项
   function syncFollowMark(list) {
-    list.querySelectorAll('select[data-kind="codeStyle"], select[data-kind="codeSound"]').forEach(function (sel) {
+    list.querySelectorAll('select[data-kind="codeStyle"], select[data-kind="codeSound"], select[data-kind="casualStyle"], select[data-kind="casualSound"]').forEach(function (sel) {
       var dd = sel.closest(".dd");
       if (dd) dd.classList.toggle("dd-follow", sel.value === "");
     });
@@ -1667,12 +1882,27 @@ function boot() {
     if (!list) return;
     var note = document.getElementById("snd-mode-note");
     var isCode = sndMode === "code";
+    var isCasual = sndMode === "casual";
 
     if (!sndData.agents.length) {
       list.removeAttribute("data-mode");
       list.innerHTML = '<div class="empty">' + esc(sndData.agentsError || "没有找到助手") + "</div>";
       if (note) note.style.display = "none";
       return;
+    }
+    // 闲聊只接主助手：这一屏只渲染主助手那一行，其他伙伴没得调
+    var rows = sndData.agents;
+    var casualMissing = "";
+    if (isCasual) {
+      var primary = String(sndData.primaryAgent || "");
+      rows = primary
+        ? sndData.agents.filter(function (x) { return x.id === primary; })
+        : [];
+      if (!rows.length) {
+        casualMissing = primary
+          ? "没在名单里找到主助手（" + esc(primary) + "），它可能被隐藏了。先去「管理助手」把主助手勾出来，再回来看这一屏。"
+          : "没读到你在 Hana 里配置的主助手。确认设过主助手后，刷新这一页再试。";
+      }
     }
     if (note) {
       note.style.display = "";
@@ -1681,18 +1911,28 @@ function boot() {
     }
     list.setAttribute("data-mode", sndMode);
 
-    var html = isCode
+    if (isCasual && !rows.length) {
+      list.innerHTML = '<div class="snd-head"><span class="who"></span><span class="col-style">文案风格</span><span class="col-sound">音效</span><span class="col-action" aria-hidden="true"></span></div>' +
+        '<div class="casual-solo-hint">' + casualMissing + "</div>";
+      return;
+    }
+
+    var html = isCode || isCasual
       ? '<div class="snd-head"><span class="who"></span><span class="col-style">文案风格</span><span class="col-sound">音效</span><span class="col-action" aria-hidden="true"></span></div>'
       : '<div class="snd-head"><span class="who"></span><span class="col-style">文案风格</span><span class="col-sound">音效</span><span class="col-trigger">提醒时机</span><span class="col-action" aria-hidden="true"></span></div>';
 
-    for (var i = 0; i < sndData.agents.length; i++) {
-      var a = sndData.agents[i];
+    for (var i = 0; i < rows.length; i++) {
+      var a = rows[i];
       var aid = esc(a.id);
       html += '<div class="snd-row"><span class="who">' + esc(a.name) + "</span>";
       if (isCode) {
         html += '<select data-agent="' + aid + '" data-kind="codeStyle" title="代码窗口的提醒用哪套文案；跟随聊天窗口 = 和聊天那边一样">' + codeStyleOptions(a) + "</select>" +
           '<select data-agent="' + aid + '" data-kind="codeSound" title="代码窗口的提醒用哪个音效；跟随聊天窗口 = 和聊天那边一样">' + codeSoundOptions(a) + "</select>" +
           '<span class="snd-actions"><button class="mini" data-preview="' + aid + '" data-mode="code">试听</button></span>';
+      } else if (isCasual) {
+        html += '<select data-agent="' + aid + '" data-kind="casualStyle" title="闲聊窗口的提醒用哪套文案；跟随聊天窗口 = 和聊天那边一样">' + casualStyleOptions(a) + "</select>" +
+          '<select data-agent="' + aid + '" data-kind="casualSound" title="闲聊窗口的提醒用哪个音效；跟随聊天窗口 = 和聊天那边一样">' + casualSoundOptions(a) + "</select>" +
+          '<span class="snd-actions"><button class="mini" data-preview="' + aid + '" data-mode="casual">试听</button></span>';
       } else {
         html += '<select data-agent="' + aid + '" data-kind="style">' + styleOptions(a) + "</select>" +
           '<select data-agent="' + aid + '" data-kind="sound">' + sndOptions(a) + "</select>" +
@@ -1710,20 +1950,23 @@ function boot() {
       sel.addEventListener("change", function () {
         var kind = sel.dataset.kind;
         var isCodeSel = kind === "codeStyle" || kind === "codeSound";
-        var path = kind === "style" || kind === "codeStyle"
+        var isCasualSel = kind === "casualStyle" || kind === "casualSound";
+        var path = kind === "style" || kind === "codeStyle" || kind === "casualStyle"
           ? "/api/agents/style"
           : kind === "trigger"
             ? "/api/agents/trigger"
             : "/api/sounds/assign";
         api(path, {
           method: "POST",
-          body: JSON.stringify({ agentId: sel.dataset.agent, value: sel.value, mode: isCodeSel ? "code" : "normal" })
+          body: JSON.stringify({ agentId: sel.dataset.agent, value: sel.value, mode: isCodeSel ? "code" : isCasualSel ? "casual" : "normal" })
         }).then(function (rr) {
           if (rr.ok && kind === "style") sndData.styleAssignments = rr.assignments || {};
           if (rr.ok && kind === "sound") sndData.assignments = rr.assignments || {};
           if (rr.ok && kind === "trigger") sndData.triggerAssignments = rr.assignments || {};
           if (rr.ok && kind === "codeStyle") sndData.codeStyleAssignments = rr.assignments || {};
           if (rr.ok && kind === "codeSound") sndData.codeAssignments = rr.assignments || {};
+          if (rr.ok && kind === "casualStyle") sndData.casualStyleAssignments = rr.assignments || {};
+          if (rr.ok && kind === "casualSound") sndData.casualAssignments = rr.assignments || {};
           syncFollowMark(list);
           showTip("snd-tip", rr.ok ? "已保存 ✓" : "保存失败：" + (rr.error || "未知原因"), rr.ok ? 1500 : 3000);
         }).catch(function () { showTip("snd-tip", "保存失败", 3000); });
@@ -1733,21 +1976,29 @@ function boot() {
     list.querySelectorAll("[data-preview]").forEach(function (btn) {
       btn.addEventListener("click", function () {
         var aid = btn.dataset.preview;
-        var wantCode = btn.dataset.mode === "code";
+        var wantMode = btn.dataset.mode === "code" ? "code" : btn.dataset.mode === "casual" ? "casual" : "normal";
+        var styleKind = wantMode === "code" ? "codeStyle" : wantMode === "casual" ? "casualStyle" : "style";
+        var soundKind = wantMode === "code" ? "codeSound" : wantMode === "casual" ? "casualSound" : "sound";
         // 所见即所得：直接读下拉当前选中值（不等保存时序），没有对应控件才回退已保存配置
-        var styleSel = list.querySelector('select[data-kind="' + (wantCode ? "codeStyle" : "style") + '"][data-agent="' + aid + '"]');
-        var soundSel = list.querySelector('select[data-kind="' + (wantCode ? "codeSound" : "sound") + '"][data-agent="' + aid + '"]');
-        var fallbackStyle = wantCode
+        var styleSel = list.querySelector('select[data-kind="' + styleKind + '"][data-agent="' + aid + '"]');
+        var soundSel = list.querySelector('select[data-kind="' + soundKind + '"][data-agent="' + aid + '"]');
+        var fallbackStyle = wantMode === "code"
           ? (sndData.codeStyleAssignments[aid] || sndData.styleAssignments[aid] || "default")
-          : (sndData.styleAssignments[aid] || "default");
-        var fallbackSound = wantCode
+          : wantMode === "casual"
+            ? (sndData.casualStyleAssignments[aid] || sndData.styleAssignments[aid] || "default")
+            : (sndData.styleAssignments[aid] || "default");
+        var fallbackSound = wantMode === "code"
           ? (sndData.codeAssignments[aid] || sndData.assignments[aid] || "default")
-          : (sndData.assignments[aid] || "default");
+          : wantMode === "casual"
+            ? (sndData.casualAssignments[aid] || sndData.assignments[aid] || "default")
+            : (sndData.assignments[aid] || "default");
         var styleValue = styleSel && styleSel.value ? styleSel.value : fallbackStyle;
         var value = soundSel && soundSel.value ? soundSel.value : fallbackSound;
         api("/api/sound/preview", {
           method: "POST",
-          body: JSON.stringify({ agentId: aid, file: value === "default" ? "" : value, style: styleValue, mode: wantCode ? "code" : "normal" })
+          // 试听也要走润色（标题正文由模型改写），同测试通知放宽到 30 秒
+          signal: AbortSignal.timeout(30000),
+          body: JSON.stringify({ agentId: aid, file: value === "default" ? "" : value, style: styleValue, mode: wantMode })
         }).then(function (rr) {
           showTip("snd-tip", rr.sent ? "提醒已提交，留意弹窗和提示音" : "发送失败", 2500);
         }).catch(function () { showTip("snd-tip", "请求失败", 3000); });
@@ -1760,7 +2011,7 @@ function boot() {
     if (!box) return;
     box.querySelectorAll("button").forEach(function (btn) {
       btn.addEventListener("click", function () {
-        var next = btn.dataset.mode === "code" ? "code" : "chat";
+        var next = btn.dataset.mode === "code" ? "code" : btn.dataset.mode === "casual" ? "casual" : "chat";
         if (next === sndMode) return;
         sndMode = next;
         box.querySelectorAll("button").forEach(function (b) {
@@ -1782,6 +2033,9 @@ function boot() {
           triggerAssignments: r.triggerAssignments || {},
           codeAssignments: r.codeAssignments || {},
           codeStyleAssignments: r.codeStyleAssignments || {},
+          casualAssignments: r.casualAssignments || {},
+          casualStyleAssignments: r.casualStyleAssignments || {},
+          primaryAgent: r.primaryAgent || "",
           styles: r.styles || [],
           hiddenAgents: r.hiddenAgents || [],
           agentsError: r.agentsError || ""

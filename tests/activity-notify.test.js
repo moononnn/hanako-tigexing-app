@@ -5,6 +5,7 @@ import fs from "node:fs";
 
 import {
   ActivityNotificationTracker,
+  AgentNoticeWindow,
   activityNotificationKeys,
   buildActivityNotification,
   resolveActivitySessionPath
@@ -117,4 +118,28 @@ test("活动通知去重：只使用规范化完整路径键", () => {
     activityNotificationKeys("C:/activity/cron.jsonl"),
     ["path:c:\\activity\\cron.jsonl"]
   );
+});
+
+test("任务自己刚弹过提醒时，完成通知不再补一条", () => {
+  // 实机 2026-10-31 09:01：Epic 任务跑的过程中自己弹了内容提醒，
+  // 任务结束后提个醒又补一条「计划任务完成」，用户看到两条在说同一件事。
+  const win = new AgentNoticeWindow(5 * 60 * 1000);
+  const t0 = 1_000_000;
+  assert.equal(win.active("hanako", t0), false);
+  win.mark("hanako", t0);
+  assert.equal(win.active("hanako", t0 + 1000), true);
+  assert.equal(win.active("agent_b", t0 + 1000), false, "别的伙伴不受影响");
+  assert.equal(win.active("hanako", t0 + 5 * 60 * 1000 + 1), false, "窗口过了就不算");
+});
+
+test("任务内提醒窗口：空 agentId 不记也不命中", () => {
+  const win = new AgentNoticeWindow();
+  assert.equal(win.mark("", 1000), false);
+  assert.equal(win.active("", 1000), false);
+});
+
+test("index.js 里两处判断接上了：带 activityId 的不当任务内提醒，活动更新时检查窗口", () => {
+  assert.match(ENTRY, /if \(!event\?\.activityId\) \{/);
+  assert.match(ENTRY, /agentNoticeWindow\.mark/, "任务自己发通知时要记一笔");
+  assert.match(ENTRY, /agentNoticeWindow\.active\(activity\.agentId\)/, "活动完成时要查窗口");
 });

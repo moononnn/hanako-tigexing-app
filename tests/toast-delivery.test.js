@@ -3,6 +3,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sendToast, deliverToast } from '../lib/toast.js';
 
@@ -107,4 +110,54 @@ test('两个通道均失败时准确返回失败', async () => {
   const fake = fakeProcess((child) => child.emit('close', 1));
   const result = await deliverToast(options, async () => { throw new Error('permission denied'); }, fake.dependencies);
   assert.deepEqual(result, { sent: false, via: 'failed' });
+});
+
+function readStatus(file) {
+  return JSON.parse(fs.readFileSync(file, 'utf8'));
+}
+
+test('降级时把原因落盘，设置页据此提示怎么修', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'txs-deliver-'));
+  try {
+    const statusFile = path.join(dir, 'toast-status.json');
+    const fake = fakeProcess((child) => { child.stderr.write('DisabledForApplication'); child.emit('close', 1); });
+    const result = await deliverToast({ ...options, statusFile }, async () => ({ shown: true }), fake.dependencies);
+    assert.deepEqual(result, { sent: true, via: 'host' });
+    const saved = readStatus(statusFile);
+    assert.equal(saved.via, 'host');
+    assert.equal(saved.kind, 'no-marker');
+    assert.match(saved.detail, /DisabledForApplication/);
+    assert.ok(Date.parse(saved.at) > 0, '要带时间戳，否则横幅无从判断新旧');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('两条腿都失败时记 failed，不冒充成功', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'txs-deliver-'));
+  try {
+    const statusFile = path.join(dir, 'toast-status.json');
+    const fake = fakeProcess((child) => child.emit('error', new Error('spawn powershell EACCES')));
+    const result = await deliverToast({ ...options, statusFile }, async () => { throw new Error('宿主通道也挂了'); }, fake.dependencies);
+    assert.deepEqual(result, { sent: false, via: 'failed' });
+    const saved = readStatus(statusFile);
+    assert.equal(saved.via, 'failed');
+    assert.match(saved.detail, /EACCES/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('走自己的通道时落一笔 ok，之前那条降级提示就被盖掉', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'txs-deliver-'));
+  try {
+    const statusFile = path.join(dir, 'toast-status.json');
+    fs.writeFileSync(statusFile, JSON.stringify({ at: '2026-10-31T09:00:00.000Z', via: 'host', kind: 'no-marker' }), 'utf8');
+    const fake = fakeProcess((child) => { child.stdout.write('TXS_TOAST_SUBMITTED\n'); child.emit('close', 0); });
+    const result = await deliverToast({ ...options, statusFile }, () => { throw new Error('不得走备用通道'); }, fake.dependencies);
+    assert.deepEqual(result, { sent: true, via: 'powershell' });
+    assert.equal(readStatus(statusFile).via, 'powershell');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

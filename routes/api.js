@@ -20,12 +20,15 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { createConfigManager } from "../lib/config.js";
+import { appendDebugLog } from "../lib/debug-log.js";
 import { deliverToast } from "../lib/toast.js";
+import { readToastStatus, explainToastStatus, toastStatusFilePath } from "../lib/toast-status.js";
 import { listSounds, resolveSound, soundsDir } from "../lib/sounds.js";
 import { resolveAgentAvatar } from "../lib/agent-avatar.js";
 import { getStyle, getStyleIds, getStyleGroups } from "../lib/style.js";
 import { buildNotificationCopy } from "../lib/notification-copy.js";
 import { validateExternalNotify, planExternalNotify } from "../lib/external-notify.js";
+import { CASUAL_MARKER } from "../lib/casual-notify.js";
 import { biaoqingbaoInstalled, resolveHanaHome } from "../lib/dialect-links.js";
 import { createRefineModelConfig } from "../lib/refine-model.js";
 import { UpdateChecker } from "../lib/update-checker/index.js";
@@ -102,6 +105,75 @@ export default function (app, ctx) {
     return (Array.isArray(result?.agents) ? result.agents : [])
       .filter((partner) => partner?.id)
       .map((partner) => ({ id: partner.id, name: partner.name || partner.id }));
+  }
+
+  // 主助手：跟宿主的判定完全一致（读 user/preferences.json 的 primaryAgent，
+  // 没配或目录不对就回退到 agents 下第一个有 config.yaml 的目录）。
+  // 闲聊窗口目前只接主助手，所以「闲聊窗口」那屏只该让它一行可调。
+  //
+  // 必须走 ResourceIO：App 跑在带 fs 限制的进程里，裸 readFileSync 读 HANA_HOME
+  // 会被拒（ERR_ACCESS_DENIED，实机验过），只能读宿主授权的目录。
+  async function readFileText(absPath) {
+    try {
+      const result = await ctx.resources.read({ kind: "local-file", path: absPath });
+      const content = result?.content ?? result;
+      if (typeof content === "string") return content;
+      if (typeof content?.text === "string") return content.text;
+      if (content?.type === "Buffer" && Array.isArray(content.data)) return Buffer.from(content.data).toString("utf-8");
+      if (content instanceof Uint8Array) return Buffer.from(content).toString("utf-8");
+      return "";
+    } catch (error) {
+      log?.warn?.("[提个醒] 读取文件失败", { path: absPath, error: error?.message || String(error) });
+      return "";
+    }
+  }
+
+  async function fileExists(absPath) {
+    try {
+      const stat = await ctx.resources.stat({ kind: "local-file", path: absPath });
+      return !!stat?.exists && !stat.isDirectory;
+    } catch {
+      return false;
+    }
+  }
+
+  async function listDirNames(dir) {
+    try {
+      const result = await ctx.resources.list({ kind: "local-file", path: dir });
+      const entries = Array.isArray(result)
+        ? result
+        : result?.entries || result?.items || result?.children || result?.files || [];
+      if (!Array.isArray(entries)) return [];
+      return entries
+        .map((entry) => typeof entry === "string" ? { name: entry, isDirectory: true } : entry)
+        .filter((entry) => entry && entry.isDirectory !== false)
+        .map((entry) => String(entry.name || entry.path || "").replace(/[\\/]+$/, ""))
+        .filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
+  async function readPrimaryAgentId() {
+    const agentsRoot = path.join(HANA_HOME, "agents");
+    const prefsText = await readFileText(path.join(HANA_HOME, "user", "preferences.json"));
+    if (prefsText) {
+      try {
+        const id = String(JSON.parse(prefsText)?.primaryAgent || "").trim();
+        if (id && await fileExists(path.join(agentsRoot, id, "config.yaml"))) return id;
+      } catch { /* 解析失败就往下回退 */ }
+    }
+    for (const name of await listDirNames(agentsRoot)) {
+      if (await fileExists(path.join(agentsRoot, name, "config.yaml"))) return name;
+    }
+    appendDebugLog(dataDir, `主助手判不出来（HANA_HOME=${HANA_HOME}，prefs 读到 ${prefsText ? "有" : "无"}）`);
+    return "";
+  }
+
+  // 写入布局设置前确认：闲聊窗口只允许主助手（判不出主助手就不拦，避免功能整个废掉）
+  async function casualWriteAllowed(agentId) {
+    const primary = await readPrimaryAgentId();
+    return !primary || primary === agentId;
   }
 
   async function getPartnerAvatar(agentId) {
@@ -185,6 +257,13 @@ export default function (app, ctx) {
   // ============================================================
   // 页面「关于」卡片用：当前版本号（从安装目录的 manifest 读）
   app.get("/api/version", (c) => c.json({ ok: true, version: currentVersion }));
+
+  // 设置页顶部横幅用：最近一次通知是走自己的外壳（带头像），还是被宿主接管了，
+  // 以及该让人去哪里修。只读，不做任何改动。
+  app.get("/api/toast-status", (c) => {
+    const status = readToastStatus(toastStatusFilePath(dataDir));
+    return c.json({ ok: true, status, notice: explainToastStatus(status) });
+  });
 
   app.get("/api/config", (c) => {
     return c.json({ ok: true, config: configManager.get() });
@@ -290,6 +369,11 @@ export default function (app, ctx) {
       // Code 页窗口单独分配：空对象 / 没这个助手 = 跟随普通窗口
       codeAssignments: cfg.agentCodeSounds || {},
       codeStyleAssignments: cfg.agentCodeStyles || {},
+      // 闲聊窗口单独分配：口径同 Code，空格 = 跟随聊天窗口
+      casualAssignments: cfg.agentCasualSounds || {},
+      casualStyleAssignments: cfg.agentCasualStyles || {},
+      // 闲聊只有主助手参与，设置页靠它决定「闲聊窗口」那屏渲染哪一行
+      primaryAgent: await readPrimaryAgentId(),
       triggerAssignments: cfg.agentTriggers || {}
     });
   });
@@ -368,13 +452,19 @@ export default function (app, ctx) {
   app.post("/api/agents/style", async (c) => {
     const body = await c.req.json().catch(() => ({}));
     const agentId = String(body.agentId || "").trim();
-    const value = String(body.value || "default").trim();
-    // mode=code 写 Code 页窗口那一栏；空串 = 删掉该助手的单独设置，回到跟随普通窗口
-    const field = String(body.mode || "normal").trim() === "code" ? "agentCodeStyles" : "agentStyles";
+    // 空串是「跟随聊天窗口」的合法值，不能被 || 兜成 default（Code 栏以前就栽在这）
+    const value = body.value == null ? "default" : String(body.value).trim();
+    // mode=code 写 Code 页窗口那一栏，mode=casual 写闲聊窗口那一栏；
+    // 空串 = 删掉该助手的单独设置，回到跟随聊天窗口
+    const mode = String(body.mode || "normal").trim();
+    const field = mode === "code" ? "agentCodeStyles" : mode === "casual" ? "agentCasualStyles" : "agentStyles";
     if (!agentId) return c.json({ ok: false, error: "missing agentId" });
+    if (mode === "casual" && !(await casualWriteAllowed(agentId))) {
+      return c.json({ ok: false, error: "闲聊窗口只有主助手可以设置" }, 403);
+    }
     const cfg = configManager.get();
     const next = { ...(cfg[field] || {}) };
-    if (value === "" && field === "agentCodeStyles") {
+    if (value === "" && field !== "agentStyles") {
       delete next[agentId];
       await configManager.patch({ [field]: next });
       return c.json({ ok: true, assignments: configManager.get()[field] || {} });
@@ -456,12 +546,16 @@ export default function (app, ctx) {
     const body = await c.req.json().catch(() => ({}));
     const agentId = String(body.agentId || "").trim();
     const value = String(body.value ?? "default").trim();
-    // mode=code 写 Code 页窗口那一栏；空串 = 删掉该助手的单独设置，回到跟随普通窗口
-    const field = String(body.mode || "normal").trim() === "code" ? "agentCodeSounds" : "agentSounds";
+    // mode=code / mode=casual 分别写 Code 页窗口、闲聊窗口那一栏；空串 = 跟随聊天窗口
+    const mode = String(body.mode || "normal").trim();
+    const field = mode === "code" ? "agentCodeSounds" : mode === "casual" ? "agentCasualSounds" : "agentSounds";
     if (!agentId) return c.json({ ok: false, error: "missing agentId" });
+    if (mode === "casual" && !(await casualWriteAllowed(agentId))) {
+      return c.json({ ok: false, error: "闲聊窗口只有主助手可以设置" }, 403);
+    }
     const cfg = configManager.get();
     const next = { ...(cfg[field] || {}) };
-    if (value === "" && field === "agentCodeSounds") {
+    if (value === "" && field !== "agentSounds") {
       delete next[agentId];
       await configManager.patch({ [field]: next });
       return c.json({ ok: true, assignments: configManager.get()[field] || {} });
@@ -485,12 +579,16 @@ export default function (app, ctx) {
     const file = (body && body.file) || c.req.query("file") || "";
     const agentId = String((body && body.agentId) || "").trim();
     const reqStyle = String((body && body.style) || "").trim();
-    const wantCode = String((body && body.mode) || "").trim() === "code";
+    const reqMode = String((body && body.mode) || "").trim();
+    const wantCode = reqMode === "code";
+    const wantCasual = reqMode === "casual";
     const cfg = configManager.get();
     // 风格优先用请求里当前选中的值（所见即所得，不等保存时序）；没传才回退已保存配置
-    const fallbackStyle = wantCode
-      ? ((cfg.agentCodeStyles || {})[agentId] || (cfg.agentStyles || {})[agentId] || "default")
-      : ((cfg.agentStyles || {})[agentId] || "default");
+    const fallbackStyle = wantCasual
+      ? ((cfg.agentCasualStyles || {})[agentId] || (cfg.agentStyles || {})[agentId] || "default")
+      : wantCode
+        ? ((cfg.agentCodeStyles || {})[agentId] || (cfg.agentStyles || {})[agentId] || "default")
+        : ((cfg.agentStyles || {})[agentId] || "default");
     const styleId = reqStyle && getStyleIds().includes(reqStyle) ? reqStyle : fallbackStyle;
     const style = getStyle(styleId);
     const partners = await listPartnersFromHost();
@@ -506,14 +604,15 @@ export default function (app, ctx) {
     const sample = PREVIEW_SAMPLES[styleId] || PREVIEW_SAMPLES.default;
     const { sent, via } = await deliverToast({
       pluginDir,
-      title: (wantCode ? "〔Code〕" : "") + style.title("first", name, 1),
+      title: (wantCasual ? CASUAL_MARKER : wantCode ? "〔Code〕" : "") + style.title("first", name, 1),
       message: style.body("first", sample, 1),
       style: cfg.toastStyle,
       // 头像名经 ResourceIO 授权列出，Toast 子进程读取具体路径。
       icon: await getPartnerAvatar(agentId) || undefined,
       sound,
       duration: cfg.toastDuration,
-      log
+      log,
+      statusFile: toastStatusFilePath(dataDir)
     }, (input) => ctx.notifications.show(input));
     return c.json({ ok: sent, sent, via, ...(sent ? {} : { error: "通知提交失败，请查看 Hana 日志" }) });
   });
@@ -525,18 +624,26 @@ export default function (app, ctx) {
     const cfg = configManager.get();
     const visiblePartners = (await listPartnersFromHost())
       .filter((partner) => !(cfg.hiddenAgents || []).includes(partner.id));
-    const agentId = String(body.agentId || (visiblePartners[0] && visiblePartners[0].id) || "").trim();
+    // mode=code / mode=casual 时用对应那一屏的设置试弹，方便在设置页当场听出区别
+    const reqMode = String(body.mode || "normal").trim();
+    const wantCode = reqMode === "code";
+    const wantCasual = reqMode === "casual";
+    // 闲聊只有主助手参与：没点名就用主助手试
+    const casualPrimary = wantCasual ? await readPrimaryAgentId() : "";
+    const agentId = String(body.agentId || casualPrimary || (visiblePartners[0] && visiblePartners[0].id) || "").trim();
     const partner = visiblePartners.find((item) => item.id === agentId);
     const name = partner ? partner.name : agentId || "助手";
-    // mode=code 时用 Code 页窗口那一栏的设置试弹，方便在设置页当场听出区别
-    const wantCode = String(body.mode || "normal").trim() === "code";
-    const styleId = wantCode
-      ? ((cfg.agentCodeStyles || {})[agentId] || (cfg.agentStyles || {})[agentId] || "default")
-      : ((cfg.agentStyles || {})[agentId] || "default");
+    const styleId = wantCasual
+      ? ((cfg.agentCasualStyles || {})[agentId] || (cfg.agentStyles || {})[agentId] || "default")
+      : wantCode
+        ? ((cfg.agentCodeStyles || {})[agentId] || (cfg.agentStyles || {})[agentId] || "default")
+        : ((cfg.agentStyles || {})[agentId] || "default");
     const style = getStyle(styleId);
-    const soundCfg = wantCode
-      ? ((cfg.agentCodeSounds || {})[agentId] || (cfg.agentSounds || {})[agentId] || "default")
-      : ((cfg.agentSounds || {})[agentId] || "default");
+    const soundCfg = wantCasual
+      ? ((cfg.agentCasualSounds || {})[agentId] || (cfg.agentSounds || {})[agentId] || "default")
+      : wantCode
+        ? ((cfg.agentCodeSounds || {})[agentId] || (cfg.agentSounds || {})[agentId] || "default")
+        : ((cfg.agentSounds || {})[agentId] || "default");
     let sound;
     if (soundCfg === "silent") sound = "silent";
     else if (soundCfg !== "default") {
@@ -557,13 +664,14 @@ export default function (app, ctx) {
     }
     const { sent, via } = await deliverToast({
       pluginDir,
-      title: (wantCode ? "〔Code〕" : "") + copy.title,
+      title: (wantCasual ? CASUAL_MARKER : wantCode ? "〔Code〕" : "") + copy.title,
       message: copy.body,
       style: cfg.toastStyle,
       icon: await getPartnerAvatar(agentId) || undefined,
       sound,
       duration: cfg.toastDuration,
       log,
+      statusFile: toastStatusFilePath(dataDir),
     }, (input) => ctx.notifications.show(input));
     return c.json({ ok: sent, sent, via, agentId, name, ...(sent ? {} : { error: "通知提交失败，请查看 Hana 日志" }) });
   });
@@ -622,7 +730,7 @@ export default function (app, ctx) {
       plan.toast.icon = await getPartnerAvatar(partnerId) || undefined;
     }
 
-    const { sent, via } = await deliverToast({ pluginDir, ...plan.toast, log }, (input) => ctx.notifications.show(input));
+    const { sent, via } = await deliverToast({ pluginDir, ...plan.toast, log, statusFile: toastStatusFilePath(dataDir) }, (input) => ctx.notifications.show(input));
     return c.json({
       ok: sent,
       sent,

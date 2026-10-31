@@ -13,7 +13,8 @@ import { fileURLToPath } from 'node:url';
 
 import { Notifier, isInQuietHours, resolveChatTrigger, makeSnippet } from './lib/policy.js';
 import { createConfigManager } from './lib/config.js';
-import { deliverToast } from './lib/toast.js';
+import { deliverToast, ensureRegistration } from './lib/toast.js';
+import { toastStatusFilePath } from './lib/toast-status.js';
 import {
   parseTurnEnd,
   parseTurnFailure,
@@ -32,6 +33,7 @@ import { AbnormalTurnTracker } from './lib/abnormal-state.js';
 import { buildAbnormalCopy, isRetryCancelled } from './lib/abnormal-copy.js';
 import {
   ActivityNotificationTracker,
+  AgentNoticeWindow,
   buildActivityNotification,
   resolveActivitySessionPath
 } from './lib/activity-notify.js';
@@ -323,6 +325,8 @@ export async function apply(ctx) {
     dbg(`后台任务收齐，${flushGraceMs}ms 静默期后再补发 session=${sid}`);
   }
   const activityNotifications = new ActivityNotificationTracker();
+  // 任务自己刚弹过的提醒：同一伙伴在这个窗口内已经发过一条，完成通知就不补了。
+  const agentNoticeWindow = new AgentNoticeWindow();
   const sessionIdsByPath = new Map();
   const sessionTitlesByPath = new Map();
 
@@ -355,11 +359,14 @@ export async function apply(ctx) {
   const resolveSessionMeta = createSessionMetaResolver({ bus: ctx.bus, debug: dbg });
   const refineModelConfig = createRefineModelConfig({ ctx, dataDir });
   const notifier = new Notifier(config.get());
+  // 最近一次投递结果落在这里，设置页据此提示「现在是本体代发的」并给出修法。
+  const toastStatusFile = toastStatusFilePath(dataDir);
 
   // ── 弹窗：两条腿 ──
   async function deliverNotification({ title, body, icon, sound, duration, style }) {
     return deliverToast({
-      pluginDir: INSTALL_DIR, title, message: body, style, icon, sound, duration, log
+      pluginDir: INSTALL_DIR, title, message: body, style, icon, sound, duration, log,
+      statusFile: toastStatusFile
     }, (input) => ctx.notifications.show(input), { ...deps.dependencies, debug: dbg });
   }
   async function notify(options) {
@@ -434,6 +441,7 @@ export async function apply(ctx) {
     }
   }
   registerFocusNotificationService();
+
 
   // ── 组装并弹一条 ──
   async function doToast(decision, toastStyle, copyOverride) {
@@ -650,6 +658,13 @@ export async function apply(ctx) {
           dbg(`活动提醒去重 原版通知已到达 kind=${activity.kind} sessionFile=${activity.sessionFile || '无'}`);
           return;
         }
+      }
+
+      // 任务本轮已经自己弹过提醒了，就不要再补一条「完成」。
+      // 用户看到的重复就是这种情况：内容提醒 + 完成提醒，两句话在说同一件事。
+      if (agentNoticeWindow.active(activity.agentId)) {
+        dbg(`活动提醒跳过：任务本轮已发过通知 kind=${activity.kind} agent=${activity.agentId}`);
+        return;
       }
 
       if (trigger === 'whenUnfocused' && await isHanaFocused()) {
@@ -919,8 +934,9 @@ export async function apply(ctx) {
     const fullText = texts.join(' ');
     const snippet = makeSnippet(fullText);
     const style = getStyle(pickStyleId({
-      inCode: false,
+      inCasual: true,
       agentId,
+      casualStyles: cfg.agentCasualStyles,
       codeStyles: cfg.agentCodeStyles,
       styles: cfg.agentStyles
     }));
@@ -951,8 +967,9 @@ export async function apply(ctx) {
     }
 
     const soundCfg = pickSoundId({
-      inCode: false,
+      inCasual: true,
       agentId,
+      casualSounds: cfg.agentCasualSounds,
       codeSounds: cfg.agentCodeSounds,
       sounds: cfg.agentSounds
     });
@@ -1079,7 +1096,14 @@ export async function apply(ctx) {
 
         // 宿主活动通知（计划任务 / 巡检完成这类）先记账，稍后按活动会话去重
         if (et === 'notification') {
-          activityNotifications.mark(sessionPath || event?.sessionFile || event?.sessionPath);
+          const marked = sessionPath || event?.sessionFile || event?.sessionPath;
+          const ok = activityNotifications.mark(marked);
+          // 不带 activityId 的是任务自己发的提醒（不是宿主的完成通知）：记一笔，
+          // 任务跑完后就别再补一条「计划任务完成」，否则同一天同一件事弹两遍。
+          if (!event?.activityId) {
+            agentNoticeWindow.mark(event?.agentId);
+          }
+          dbg(`宿主通知记账 key=${marked || '无'} ok=${ok} activityId=${event?.activityId || '无'} agent=${event?.agentId || '无'}`);
           // 闲聊本体提醒也走这个事件：记一笔，好判断是不是同一句、别弹两遍。
           hostNotices.note(event);
           return;
@@ -1159,6 +1183,12 @@ export async function apply(ctx) {
           if (closedSid) {
             abnormalTurns.forget(closedSid);
             turnStarts.delete(closedSid);
+            // 收工时刻和完成序号也要清：留着会让同名会话重建时的忙闲判定串到上一轮。
+            turnEnds.delete(closedSid);
+            turnSeqBySession.delete(closedSid);
+            // 合并窗口的定时器不停掉，会话关了 30 秒后还会补弹一条「又回了 N 条」。
+            clearSessionTimer(closedSid);
+            notifier.sessions.delete(closedSid);
             if (backgroundTasks.forget(closedSid)) {
               dbg(`会话关闭，清空后台任务计数 session=${closedSid}`);
             }
@@ -1299,10 +1329,31 @@ export async function apply(ctx) {
   dbg('总线订阅成功');
   log?.info?.('[提个醒] 小喇叭已戴上（应用版）');
 
+  // 首次注册（快捷方式 + AUMID）是这条链路里最容易失败的一步，又恰好发生在
+  // 第一条通知那一刻，出了问题用户只看到一个换了壳的通知，什么也看不出来。
+  // 挂到启动预热里跑：失败只记日志，不挡启动；真失败时第一条通知会降级，
+  // 设置页那条横幅会拿这次记录告诉人该怎么修。
+  async function warmUpToastRegistration() {
+    // 测试都注入假 spawnProcess，没注入才是真实运行，才该去碰系统注册表。
+    if (deps.dependencies?.spawnProcess) return;
+    try {
+      const result = await ensureRegistration({
+        pluginDir: INSTALL_DIR,
+        ...(deps.dependencies || {}),
+        debug: dbg
+      });
+      if (result.ok) dbg('通知外壳注册预热完成');
+      else dbg(`通知外壳注册预热未完成 kind=${result.kind} detail=${result.detail || result.stderr || ''}`);
+    } catch (error) {
+      dbg('通知外壳注册预热异常：' + (error?.message || error));
+    }
+  }
+
   // 装载完成后再做需要宿主授权的动作：apply 里不能发受保护请求。
   const prewarm = setTimeout(() => {
     void refreshAgents();
     void refreshSessionTitleIndex();
+    void warmUpToastRegistration();
   }, 4000);
   prewarm.unref?.();
 }

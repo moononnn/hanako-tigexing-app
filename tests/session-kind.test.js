@@ -74,7 +74,7 @@ test("普通窗口不加记号", async () => {
   assert.equal(isCodeSession("app"), false);
 });
 
-test("查询失败不抛错，按普通窗口处理，也不缓存失败", async () => {
+test("查询失败不抛错，按普通窗口处理，失败只短暂缓存", async () => {
   let attempt = 0;
   const bus = fakeBus(() => {
     attempt += 1;
@@ -86,8 +86,37 @@ test("查询失败不抛错，按普通窗口处理，也不缓存失败", async
   const first = await resolve({ sessionId: "sess_retry", sessionPath });
   assert.equal(first.namespace, "", "两条路都失败就当作普通窗口");
   assert.equal(first.title, "");
+  // 负结果保鲜期内不再白问：同一会话两次调用只打一轮请求（sessionId + 路径各一次）。
   const second = await resolve({ sessionId: "sess_retry", sessionPath });
-  assert.equal(second.namespace, "code", "失败结果不能进缓存，下次要能查到");
+  assert.equal(second.namespace, "", "保鲜期内仍按普通窗口处理");
+  assert.equal(bus.calls.length, 2, "失败结果要缓存，别每回合重问");
+});
+
+test("负缓存过期后会重新查，能自己恢复", async () => {
+  let attempt = 0;
+  const bus = fakeBus(() => {
+    attempt += 1;
+    if (attempt <= 2) throw new Error("bus timeout");
+    return { session: { namespace: "code" } };
+  });
+  const resolve = createSessionMetaResolver({ bus, negativeTtlMs: 1 });
+  const sessionPath = "D:\\hana\\agents\\hanako\\sessions\\z.jsonl";
+  assert.equal((await resolve({ sessionId: "sess_expire", sessionPath })).namespace, "");
+  await new Promise((done) => setTimeout(done, 10));
+  assert.equal((await resolve({ sessionId: "sess_expire", sessionPath })).namespace, "code", "过期后要能查到");
+});
+
+test("negativeTtlMs=0 时完全不缓存失败", async () => {
+  let attempt = 0;
+  const bus = fakeBus(() => {
+    attempt += 1;
+    if (attempt <= 2) throw new Error("bus timeout");
+    return { session: { namespace: "code" } };
+  });
+  const resolve = createSessionMetaResolver({ bus, negativeTtlMs: 0 });
+  const sessionPath = "D:\\hana\\agents\\hanako\\sessions\\w.jsonl";
+  assert.equal((await resolve({ sessionId: "sess_nocache", sessionPath })).namespace, "");
+  assert.equal((await resolve({ sessionId: "sess_nocache", sessionPath })).namespace, "code");
 });
 
 test("同一会话只查一次", async () => {
@@ -121,6 +150,43 @@ test("Code 窗口的风格音效：配了用自己的，没配跟随普通", () 
   // 普通窗口永远不看 Code 那栏
   assert.equal(pickStyleId({ inCode: false, agentId: "hanako", codeStyles, styles }), "gentle");
   assert.equal(pickSoundId({ inCode: false, agentId: "hanako", codeSounds, sounds }), "a.wav");
+});
+
+test("闲聊窗口的风格音效：配了用自己的，没配跟随聊天窗口", () => {
+  const styles = { hanako: "gentle" };
+  const casualStyles = { hanako: "cheerful" };
+  const sounds = { hanako: "a.wav" };
+  const casualSounds = { hanako: "c.wav" };
+
+  assert.equal(pickStyleId({ inCasual: true, agentId: "hanako", casualStyles, styles }), "cheerful");
+  assert.equal(pickSoundId({ inCasual: true, agentId: "hanako", casualSounds, sounds }), "c.wav");
+
+  // 没配 → 跟聊天窗口一样
+  assert.equal(pickStyleId({ inCasual: true, agentId: "agent_b", casualStyles, styles }), "default");
+  assert.equal(pickSoundId({ inCasual: true, agentId: "agent_b", casualSounds, sounds }), "default");
+
+  // 聊天窗口永远不看闲聊那栏
+  assert.equal(pickStyleId({ agentId: "hanako", casualStyles, styles }), "gentle");
+  assert.equal(pickSoundId({ agentId: "hanako", casualSounds, sounds }), "a.wav");
+});
+
+test("闲聊那两栏同样走白名单，且老配置补成空对象", () => {
+  const cfg = normalizeConfig({
+    agentCasualStyles: { hanako: "default", agent_b: "not_a_style" },
+    agentCasualSounds: { hanako: "my.wav", agent_b: "silent", agent_c: "default" }
+  });
+  assert.deepEqual(cfg.agentCasualStyles, { hanako: "default" });
+  assert.deepEqual(cfg.agentCasualSounds, { hanako: "my.wav", agent_b: "silent", agent_c: "default" });
+
+  const legacy = normalizeConfig({ agentStyles: { hanako: "default" } });
+  assert.deepEqual(legacy.agentCasualStyles, {});
+  assert.deepEqual(legacy.agentCasualSounds, {});
+
+  for (const bad of [[], "casual", 42, null]) {
+    const c = normalizeConfig({ agentCasualStyles: bad, agentCasualSounds: bad });
+    assert.deepEqual(c.agentCasualStyles, {});
+    assert.deepEqual(c.agentCasualSounds, {});
+  }
 });
 
 test("Code 那两栏的配置走白名单，脏值不落盘", () => {

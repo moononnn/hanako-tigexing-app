@@ -149,5 +149,5 @@ test("路由：对外弹窗端点已注册", () => {
   assert.match(ROUTE, /validateExternalNotify/);
   assert.match(ROUTE, /planExternalNotify/);
   assert.match(ROUTE, /suppressed/);
-  assert.match(ROUTE, /await deliverToast\(\{ pluginDir, \.\.\.plan\.toast, log \}/);
+  assert.match(ROUTE, /await deliverToast\(\{ pluginDir, \.\.\.plan\.toast, log, statusFile: toastStatusFilePath\(dataDir\) \}/);
 });
