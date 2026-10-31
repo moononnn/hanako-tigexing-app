@@ -766,6 +766,14 @@ export async function apply(ctx) {
     const now = Date.now();
     const { sessionId } = info;
 
+    // 闲聊会话的完成提醒由 casual_entry 那条链路负责：标题带〔闲聊〕、走闲聊风格。
+    // 宿主也会给闲聊会话发带正文的 turn_end，这里不挡住就会同一条消息弹两条
+    // （2026-10-31 实机：〔闲聊〕姐妹！小花回你啦～ + 豆狸：小花回你啦！粒狸：快去看！）。
+    if (casualSessionIds.has(sessionId)) {
+      dbg(`闲聊会话跳过普通完成提醒 session=${sessionId}`);
+      return;
+    }
+
     // 只提醒用户真实参与的会话：后台调度（漂流瓶、小生活日常）也会产生 turn_end，
     // 那些会话从没有过用户消息，弹了是打扰。
     if (!participation.has(sessionId)) {
@@ -865,10 +873,24 @@ export async function apply(ctx) {
   }
 
   // ── 闲聊（casual chat）提醒 ──
-  // 闲聊不走主会话的 turn_end：它的会话 namespace 是 casual，宿主自己就跳过了
-  // 「聊天回复完成」通知，伙伴在闲聊里是用 chat_say 工具发言的。
-  // 真正带着内容的是 casual_entry 事件，这里接它。
+  // 伙伴在闲聊里是用 chat_say 工具发言的，带内容的是 casual_entry 事件，这里接它。
+  //
+  // 但宿主也会给闲聊会话发 turn_end（2026-10-31 实机：20:47 那条闲聊同时弹了两条，
+  // 一条〔闲聊〕走闲聊风格、一条普通款走聊天风格）。原先以为宿主会跳过闲聊的完成通知、
+  // 所以 handleTurnEnd 从来没拦过它，结果同一条消息被两条链路各提醒一遍。
+  // 现在靠 chat_say 这个工具认出「这个会话是闲聊会话」，turn_end 那边直接让路。
   const casualTurns = new CasualTurnTracker();
+  // 认得出来是闲聊会话的 id 集合。闲聊只在侧边栏发生，量很小，留个上限防内存无限涨。
+  const casualSessionIds = new Set();
+  const CASUAL_SESSION_MAX = 64;
+  function markCasualSession(sessionId) {
+    const id = String(sessionId || '').trim();
+    if (!id) return;
+    casualSessionIds.add(id);
+    while (casualSessionIds.size > CASUAL_SESSION_MAX) {
+      casualSessionIds.delete(casualSessionIds.values().next().value);
+    }
+  }
   const hostNotices = new HostNoticeMemory();
   // 语音回复在宿主那边不投 casual_entry，只发 casual_unread。
   // 这里把它认出来，否则语音的发言就完全收不到。
@@ -1109,6 +1131,18 @@ export async function apply(ctx) {
           return;
         }
 
+        // 伙伴在闲聊里用 chat_say 发言：认下这个会话是闲聊会话。
+        // 只认真正的工具调用，不靠正文里提到 chat_say 这几个字。
+        // sessionPath 优先用回调第二参，兼用事件自带的（两者说的是同一份会话文件）。
+        if (et === 'tool_execution_start' && String(event?.toolName || '') === 'chat_say') {
+          const sid = sessionIdFromPath(sessionPath || event?.sessionPath);
+          if (sid) {
+            markCasualSession(sid);
+            dbg(`认得闲聊会话 session=${sid}`);
+          }
+          return;
+        }
+
         // 闲聊窗口的消息：伙伴在闲聊里是用 chat_say 工具发言的，
         // 主会话的 turn_end 拿不到，这里接 casual_entry。
         if (et === 'casual_entry') {
@@ -1196,6 +1230,8 @@ export async function apply(ctx) {
             dropHeldToast(closedSid, '会话关闭');
             cancelPendingFlush(closedSid, '会话关闭');
             waitDebt.forget(closedSid);
+            // 闲聊标记跟着会话走：会话关了就不该再拿它挡别的回合。
+            casualSessionIds.delete(closedSid);
           }
           return;
         }
