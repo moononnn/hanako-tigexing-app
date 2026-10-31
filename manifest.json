@@ -2,9 +2,9 @@
   "manifestVersion": 2,
   "id": "tigexing-app",
   "name": "提个醒",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "entry": "index.js",
-  "description": "不用守着聊天窗口等回复：给伙伴自定义专属音效和通知风格，让你一听一看就知道哪位伙伴回了；通知标明会话，多个窗口同时聊，也知道该回哪一边。聊天窗口和 Code 窗口能分开配文案和音效，代码那边跑完的提醒还会带一个记号，一眼分得清。模型异常中断时，也会提醒你。",
+  "description": "不用守着聊天窗口等回复：给伙伴自定义专属音效和通知风格，让你一听一看就知道哪位伙伴回了；通知标明会话，多个窗口同时聊，也知道该回哪一边。聊天窗口、Code 窗口和闲聊窗口能分开配文案和音效，代码那边跑完的提醒带记号，闲聊的也带记号，一眼分得清。模型异常中断时，也会提醒你。",
   "capabilities": [
     "app/notifications.show",
     "app/process.spawn",
@@ -24,6 +24,12 @@
         "route": "/settings.html",
         "realization": "page",
         "siteNavEntry": true,
+        "fpFullPanel": true,
+        "functionPanel": {
+          "id": "nav",
+          "label": "提个醒",
+          "route": "/nav.html"
+        },
         "cardForm": "flush",
         "face": {
           "image": "assets/icon.png"

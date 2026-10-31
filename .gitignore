@@ -24,6 +24,8 @@ node_modules/
 _backups/
 *.zip
 *.bak
+*.bak-*
+*.bak.*
 
 # 云构建安装元数据（本机安装痕迹，不进公开仓库）
 .cloud-build/.installed-by.json
