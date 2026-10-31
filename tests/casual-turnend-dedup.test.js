@@ -20,7 +20,7 @@ import { PassThrough } from "node:stream";
 import { apply, toastDependencies } from "../index.js";
 
 const SESSION_PATH = path.join(
-  "C:", "Users", "laotv", ".hanako", "agents", "hanako", "sessions",
+  "C:", "Users", "tester", ".hanako", "agents", "hanako", "sessions",
   "2026-10-31T12-35-53-920Z_01a191f5-97c0-7bfd-a5a5-7f8231921afe.jsonl"
 );
 
