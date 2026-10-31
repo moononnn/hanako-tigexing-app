@@ -29,6 +29,9 @@ function makeHarness(dataDir, resourcesOverride) {
   };
   const ctx = {
     dataDir,
+    // 应用目录名随环境变（本机是 tigexing-app，CI 检出的是仓库名 hanako-tigexing-app）。
+    // 宿主实际给的是 manifest.id，这里显式钉死，配置路径才与 readPrefs 一致。
+    pluginId: "tigexing-app",
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     bus: {
       async request() {
