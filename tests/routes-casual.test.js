@@ -81,9 +81,19 @@ function makeHarness(dataDir, resourcesOverride) {
   return { call, routes };
 }
 
-function readPrefs(dataDir) {
+// 配置的保存是串行写队列（lib/config.js 的 writeChain），路由 return 时文件可能还没落盘。
+// CI 上偶发 ENOENT（本地快一点看不出来）：这里等到文件真的出现再读，最多等 1 秒。
+async function readPrefs(dataDir) {
   const file = path.join(dataDir, "tigexing-app", "preferences.json");
-  return JSON.parse(fs.readFileSync(file, "utf-8"));
+  const deadline = Date.now() + 1000;
+  for (;;) {
+    try {
+      return JSON.parse(fs.readFileSync(file, "utf-8"));
+    } catch (error) {
+      if (error.code !== "ENOENT" || Date.now() > deadline) throw error;
+      await new Promise((done) => setTimeout(done, 10));
+    }
+  }
 }
 
 test("设置页能拿到主助手 id，闲聊屏才知道渲染哪一行", async () => {
@@ -108,7 +118,7 @@ test("mode=casual 写进闲聊那两栏，不串到聊天和 Code", async () => 
     const sound = await call("POST /api/sounds/assign", { agentId: "hanako", value: "default", mode: "casual" });
     assert.equal(sound.ok, true);
 
-    const prefs = readPrefs(dir);
+    const prefs = await readPrefs(dir);
     assert.deepEqual(prefs.agentCasualStyles, { hanako: "cheerful" });
     assert.deepEqual(prefs.agentCasualSounds, { hanako: "default" });
     assert.deepEqual(prefs.agentStyles, {});
@@ -134,7 +144,7 @@ test("非主助手写闲聊那栏会被拦，写别的那两栏照旧", async ()
     const code = await call("POST /api/sounds/assign", { agentId: "agent_b", value: "default", mode: "code" });
     assert.equal(code.ok, true);
 
-    const prefs = readPrefs(dir);
+    const prefs = await readPrefs(dir);
     assert.deepEqual(prefs.agentCasualStyles, {});
     assert.deepEqual(prefs.agentCasualSounds, {});
     assert.equal(prefs.agentStyles.agent_b, "cheerful");
